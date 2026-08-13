@@ -23,11 +23,14 @@ import {
   recommendedSplitSelection,
 } from "./splitPlanSelection";
 import {
+  applySplitPlanLanguage,
+  languageButtonStates,
   normalizeSplitPlanLanguage,
   normalizeTitleColumnWidth,
   splitPlanText,
   type SplitPlanLanguage,
 } from "./splitPlanLocale";
+import { splitPlanTableLayout } from "./splitPlanLayout";
 import {
   authorStatusPresentation,
   canBulkConfirmCreators,
@@ -105,6 +108,8 @@ const ids = {
   source: "chapterize-plan-source",
   guidance: "chapterize-plan-guidance",
   language: "chapterize-plan-language",
+  languageZh: "chapterize-plan-language-zh",
+  languageEn: "chapterize-plan-language-en",
   titleWidth: "chapterize-plan-title-width",
   titleWidthValue: "chapterize-plan-title-width-value",
 };
@@ -820,15 +825,14 @@ export async function showSplitPlanDialog(
         { args: { pages: input.totalPages } },
       );
     }
-    const languageSelect = doc.getElementById(
-      ids.language,
-    ) as HTMLSelectElement | null;
-    if (languageSelect) {
-      languageSelect.value = language;
-      Array.from(languageSelect.options).forEach((node) => {
-        const option = node as HTMLOptionElement;
-        option.selected = option.value === language;
-      });
+    for (const state of languageButtonStates(language)) {
+      const button = doc.getElementById(
+        state.language === "zh-CN" ? ids.languageZh : ids.languageEn,
+      ) as HTMLButtonElement | null;
+      if (!button) continue;
+      button.textContent = getString(state.labelKey);
+      button.setAttribute("aria-pressed", String(state.pressed));
+      button.classList.toggle("chapterize-language-active", state.pressed);
     }
     const titleWidth = doc.getElementById(
       ids.titleWidth,
@@ -1176,14 +1180,17 @@ export async function showSplitPlanDialog(
               .chapterize-header-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
               .chapterize-source { color: var(--chapterize-muted); }
               .chapterize-language { display: inline-flex; align-items: center; gap: 6px; color: var(--chapterize-muted); }
-              .chapterize-language select { width: 112px; min-height: 34px; padding: 3px 28px 3px 8px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
+              .chapterize-language-options { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--chapterize-border-strong); border-radius: 5px; background: var(--chapterize-surface-subtle); }
+              .chapterize-language-options button { min-width: 64px; min-height: 30px; margin: 0; padding: 3px 9px; border: 0; border-radius: 3px; background: transparent; color: var(--chapterize-muted); font: inherit; }
+              .chapterize-language-options button:hover { color: var(--chapterize-blue-ink); }
+              .chapterize-language-options .chapterize-language-active { background: var(--chapterize-surface); color: var(--chapterize-blue-ink); box-shadow: 0 1px 2px oklch(0.22 0.025 255 / .14); font-weight: 600; }
               .chapterize-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 10px; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); }
               .chapterize-toolbar button, .chapterize-delete, #split, #cancel { min-height: 34px; margin: 0; border: 1px solid var(--chapterize-border-strong); border-radius: 5px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
               .chapterize-toolbar button { padding: 4px 11px; }
               .chapterize-toolbar button:hover, .chapterize-delete:hover, #cancel:hover { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); }
               .chapterize-toolbar button:active, .chapterize-delete:active, #cancel:active { background: var(--chapterize-surface-subtle); }
               .chapterize-toolbar button:disabled { border-color: var(--chapterize-border); color: var(--chapterize-muted); opacity: .58; }
-              .chapterize-toolbar button:focus-visible, .chapterize-delete:focus-visible, .chapterize-doi-lookup:focus-visible, .chapterize-match:focus-visible, .chapterize-author-button:focus-visible, .chapterize-author-editor button:focus-visible, #split:focus-visible, #cancel:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--chapterize-blue); outline-offset: 2px; }
+              .chapterize-toolbar button:focus-visible, .chapterize-language-options button:focus-visible, .chapterize-delete:focus-visible, .chapterize-doi-lookup:focus-visible, .chapterize-match:focus-visible, .chapterize-author-button:focus-visible, .chapterize-author-editor button:focus-visible, #split:focus-visible, #cancel:focus-visible, input:focus-visible { outline: 2px solid var(--chapterize-blue); outline-offset: 2px; }
               #chapterize-plan-recommended { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font-weight: 600; }
               .chapterize-button-active { border-color: var(--chapterize-blue) !important; background: var(--chapterize-blue-soft) !important; color: var(--chapterize-blue-ink) !important; font-weight: 600; }
               .chapterize-toolbar-separator { width: 1px; height: 26px; margin-inline: 8px; background: var(--chapterize-border); }
@@ -1191,8 +1198,8 @@ export async function showSplitPlanDialog(
               .chapterize-summary { margin-inline-start: auto; color: var(--chapterize-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
               .chapterize-guidance { padding: 8px 11px; border-inline-start: 3px solid var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font-size: .94em; line-height: 1.45; }
               .chapterize-table-wrap { min-height: 0; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); scrollbar-gutter: stable; }
-              table { width: 100%; min-width: calc(var(--chapterize-title-width, 520px) + 1050px); border-collapse: separate; border-spacing: 0; table-layout: fixed; }
-              th { position: sticky; top: 0; z-index: 3; background: var(--chapterize-surface-subtle); color: var(--chapterize-blue-ink); text-align: start; font-weight: 650; }
+              table { width: 100%; min-width: calc(var(--chapterize-title-width, 520px) + 1094px); border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+              th { position: sticky; top: 0; z-index: 3; background: var(--chapterize-surface-subtle); color: var(--chapterize-blue-ink); text-align: start; font-weight: 650; white-space: ${splitPlanTableLayout.headerWhiteSpace}; }
               th, td { padding: 7px 8px; border-bottom: 1px solid var(--chapterize-border); }
               tbody tr { background: var(--chapterize-surface); }
               tbody tr:hover { background: var(--chapterize-blue-soft); }
@@ -1200,18 +1207,18 @@ export async function showSplitPlanDialog(
               th:nth-child(1), td:nth-child(1) { width: 68px; text-align: center; }
               th:nth-child(2), td:nth-child(2) { width: 42px; color: var(--chapterize-muted); }
               th:nth-child(3), td:nth-child(3) { width: var(--chapterize-title-width, 520px); }
-              th:nth-child(4), td:nth-child(4) { width: 290px; }
+              th:nth-child(4), td:nth-child(4) { width: ${splitPlanTableLayout.doiWidth}px; }
               th:nth-child(5), td:nth-child(5) { width: 116px; }
-              th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { width: 88px; }
+              th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { width: ${splitPlanTableLayout.pageWidth}px; }
               th:nth-child(8), td:nth-child(8) { width: 112px; }
               th:nth-child(9), td:nth-child(9) { width: 58px; }
               th:nth-child(10), td:nth-child(10) { width: 104px; }
               th:nth-child(11), td:nth-child(11) { width: 82px; }
               th:nth-child(1), tbody tr:not(.chapterize-metadata-details-row) > td:nth-child(1) { position: sticky; left: 0; z-index: 2; background: inherit; }
               th:nth-child(2), tbody tr:not(.chapterize-metadata-details-row) > td:nth-child(2) { position: sticky; left: 68px; z-index: 2; background: inherit; }
-              th:nth-child(3), tbody tr:not(.chapterize-metadata-details-row) > td:nth-child(3) { position: sticky; left: 110px; z-index: 2; border-inline-end: 1px solid var(--chapterize-border-strong); background: inherit; box-shadow: 5px 0 8px -8px var(--chapterize-ink); }
+              th:nth-child(3), tbody tr:not(.chapterize-metadata-details-row) > td:nth-child(3) { position: sticky; left: 110px; z-index: 2; ${splitPlanTableLayout.stickyTitleDivider ? "border-inline-end: 1px solid var(--chapterize-border-strong); box-shadow: 5px 0 8px -8px var(--chapterize-ink);" : ""} background: inherit; }
               th:nth-child(-n+3) { z-index: 4; background: var(--chapterize-surface-subtle); }
-              td input[type="text"], td input[type="number"] { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
+              td input[type="text"], td input[type="number"] { width: 100%; min-height: 30px; margin: ${splitPlanTableLayout.controlMargin}px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
               td input[type="checkbox"] { accent-color: var(--chapterize-blue); }
               .chapterize-title-cell { min-width: 0; padding-block: 6px; }
               .chapterize-title-cell input { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1305,7 +1312,8 @@ export async function showSplitPlanDialog(
                   },
                 },
                 {
-                  tag: "label",
+                  tag: "div",
+                  id: ids.language,
                   classList: ["chapterize-language"],
                   children: [
                     {
@@ -1314,35 +1322,61 @@ export async function showSplitPlanDialog(
                       properties: { textContent: getString("dialog-language") },
                     },
                     {
-                      tag: "select",
-                      id: ids.language,
-                      properties: { value: language },
+                      tag: "div",
+                      classList: ["chapterize-language-options"],
+                      attributes: {
+                        role: "group",
+                        "aria-label": getString("dialog-language"),
+                        "data-i18n-aria-label": "dialog-language",
+                      },
                       children: [
                         {
-                          tag: "option",
-                          attributes: { value: "zh-CN" },
+                          tag: "button",
+                          id: ids.languageZh,
+                          attributes: {
+                            type: "button",
+                            "aria-pressed": String(language === "zh-CN"),
+                          },
                           properties: {
                             textContent: getString("dialog-language-zh"),
                           },
+                          listeners: [
+                            {
+                              type: "click",
+                              listener: () => {
+                                language = applySplitPlanLanguage(
+                                  "zh-CN",
+                                  (value) =>
+                                    setPref("interfaceLanguage", value),
+                                );
+                                render(dialog.window.document);
+                              },
+                            },
+                          ],
                         },
                         {
-                          tag: "option",
-                          attributes: { value: "en-US" },
+                          tag: "button",
+                          id: ids.languageEn,
+                          attributes: {
+                            type: "button",
+                            "aria-pressed": String(language === "en-US"),
+                          },
                           properties: {
                             textContent: getString("dialog-language-en"),
                           },
-                        },
-                      ],
-                      listeners: [
-                        {
-                          type: "change",
-                          listener: (event: Event) => {
-                            language = normalizeSplitPlanLanguage(
-                              (event.currentTarget as HTMLSelectElement).value,
-                            );
-                            setPref("interfaceLanguage", language);
-                            render(dialog.window.document);
-                          },
+                          listeners: [
+                            {
+                              type: "click",
+                              listener: () => {
+                                language = applySplitPlanLanguage(
+                                  "en-US",
+                                  (value) =>
+                                    setPref("interfaceLanguage", value),
+                                );
+                                render(dialog.window.document);
+                              },
+                            },
+                          ],
                         },
                       ],
                     },

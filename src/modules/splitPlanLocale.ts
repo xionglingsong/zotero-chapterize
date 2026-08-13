@@ -1,5 +1,33 @@
 export type SplitPlanLanguage = "zh-CN" | "en-US";
 
+export function applySplitPlanLanguage(
+  value: unknown,
+  persist: (language: SplitPlanLanguage) => void,
+): SplitPlanLanguage {
+  const language = normalizeSplitPlanLanguage(value);
+  persist(language);
+  return language;
+}
+
+export function languageButtonStates(language: SplitPlanLanguage): Array<{
+  language: SplitPlanLanguage;
+  labelKey: string;
+  pressed: boolean;
+}> {
+  return [
+    {
+      language: "zh-CN",
+      labelKey: "dialog-language-zh",
+      pressed: language === "zh-CN",
+    },
+    {
+      language: "en-US",
+      labelKey: "dialog-language-en",
+      pressed: language === "en-US",
+    },
+  ];
+}
+
 const zhCN: Record<string, string> = {
   "dialog-title": "Chapterize 拆分预览",
   "dialog-heading": "拆分预览",

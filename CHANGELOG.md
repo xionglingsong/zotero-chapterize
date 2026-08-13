@@ -3,6 +3,24 @@
 All notable changes to Chapterize are documented here in Chinese and English.
 Chapterize 的重要更新均在此以中英文记录。
 
+## [0.2.25] - 2026-08-13
+
+### 中文
+
+- 将 Zotero 中显示为空且无法可靠切换的语言下拉框改为“中文 / English”分段按钮；点击后立即刷新界面、窗口标题和底部操作，并保存选择。
+- 移除固定标题列右侧多余的边框与阴影，消除标题栏和 DOI 栏之间突兀的竖线。
+- 清除表格文本框的系统默认外边距并统一 DOI 单元格内边距，使 DOI 输入框与列边缘、其他行控件一致对齐。
+- 将 PDF 起始页和结束页列宽从 88px 增至 104px，并禁止表头换行，避免中英文标题断成两行。
+- 新增语言选中态与表格布局回归测试，覆盖语言持久化、DOI 对齐和页码表头稳定性。
+
+### English
+
+- Replaced the blank, unreliable Zotero language select with a visible Chinese / English segmented control that immediately refreshes the interface, window title, and footer actions while persisting the choice.
+- Removed the redundant border and shadow from the sticky title edge, eliminating the harsh vertical line between Title and DOI.
+- Removed platform-default text-input margins and normalized DOI cell spacing so DOI controls align consistently with the column and neighboring rows.
+- Increased the PDF start/end columns from 88px to 104px and prevented header wrapping in both languages.
+- Added regression coverage for language pressed state and persistence, DOI alignment, and stable page headers.
+
 ## [0.2.24] - 2026-08-13
 
 ### 中文

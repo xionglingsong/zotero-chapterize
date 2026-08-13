@@ -1,5 +1,7 @@
 import { assert } from "chai";
 import {
+  applySplitPlanLanguage,
+  languageButtonStates,
   normalizeSplitPlanLanguage,
   normalizeTitleColumnWidth,
   splitPlanText,
@@ -68,6 +70,20 @@ describe("split preview language", function () {
     assert.equal(normalizeTitleColumnWidth(200), 320);
     assert.equal(normalizeTitleColumnWidth(640), 640);
     assert.equal(normalizeTitleColumnWidth("invalid"), 520);
+  });
+
+  it("applies English directly and exposes a persistent pressed state", function () {
+    const persisted: string[] = [];
+    const language = applySplitPlanLanguage("en-US", (value) =>
+      persisted.push(value),
+    );
+
+    assert.equal(language, "en-US");
+    assert.deepEqual(persisted, ["en-US"]);
+    assert.deepEqual(languageButtonStates(language), [
+      { language: "zh-CN", labelKey: "dialog-language-zh", pressed: false },
+      { language: "en-US", labelKey: "dialog-language-en", pressed: true },
+    ]);
   });
 
   it("explains author conflicts and bulk confirmation in both languages", function () {
