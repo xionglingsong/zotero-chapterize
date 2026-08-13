@@ -3,6 +3,24 @@
 All notable changes to Chapterize are documented here in Chinese and English.
 Chapterize 的重要更新均在此以中英文记录。
 
+## [0.2.26] - 2026-08-13
+
+### 中文
+
+- 无 DOI 且 Crossref 标题匹配失败时，保留章节首页作者候选并自动预填，显示“来源：章节首页”；候选默认未确认，用户确认后才写入 Zotero。
+- 将章节标题定位改为最多五行的词覆盖评分，避免在半截标题处提前停止并把剩余标题误认成作者。
+- 支持 PDF.js 将作者姓名拆成相邻文本行、多位作者各占一行，以及姓名后带数字、星号等单位脚注标记的版式。
+- 增加大学、学院、院系、研究所、实验室等单位过滤，避免作者缺失时把单位名称写入作者字段。
+- 让无编号正文书签也参与章节首页扫描，同时继续跳过封面、目录、版权页等前置内容。
+
+### English
+
+- When no DOI is provided and Crossref title matching fails, preserve and prefill chapter-opening author candidates with a Source: chapter opening page label; candidates remain unconfirmed until the user approves them.
+- Replaced partial-title anchoring with a token-coverage score across up to five title lines, preventing the remaining title from being mistaken for an author.
+- Added support for PDF.js splitting a name across adjacent lines, multiple authors on separate lines, and trailing numeric or symbol affiliation markers.
+- Filtered university, faculty, department, institute, laboratory, and similar institution lines so they cannot fill a missing author field.
+- Included unnumbered content bookmarks in chapter-opening scans while continuing to skip covers, contents, copyright pages, and other front matter.
+
 ## [0.2.25] - 2026-08-13
 
 ### 中文

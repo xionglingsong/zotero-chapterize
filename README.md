@@ -21,7 +21,7 @@ Chapterize 是一个 Zotero 插件，可按 PDF 书签或手动页码范围预�
 - 标题匹配失败时可手动粘贴 DOI，获取完整章节元数据。
 - 提供置信度、字段级预览和逐项接受；父书编者不会被误作章作者。
 - Crossref 无匹配时可从带书签的目录页提取章作者候选，显示来源页并要求人工确认。
-- 目录无作者时可从章节开头两页的标题附近提取署名，并排除编者标签、正文和常见小标题。
+- 目录无作者时可从章节开头两页的标题附近提取署名并自动预填；支持多行标题、拆分姓名、多作者和脚注标记，同时排除编者、单位、正文和常见小标题。
 - 目录、章节首页和 Crossref 作者不一致时显示来源冲突，要求用户选择后再确认；可一键确认所有无冲突候选。
 - 可逐个编辑、添加或移除章作者；手工编辑的作者优先于后续自动匹配。
 - 拆分预览支持中文和英文即时切换，默认中文。
@@ -82,7 +82,7 @@ It supports Zotero 7, 8, and 9 and is tested primarily with Zotero 9.
 - Accept a manually pasted DOI when title matching fails and fetch complete chapter metadata.
 - Show confidence and field-level acceptance; book editors are never treated as chapter authors.
 - Extract chapter-author candidates from bookmarked contents pages when Crossref has no match, show the source page, and require explicit review.
-- When the contents omit authors, extract bylines near the title on the chapter's first two pages while rejecting editor labels, prose, and common subheadings.
+- When the contents omit authors, extract and prefill bylines near the title on the chapter's first two pages, including multiline titles, split names, multiple authors, and affiliation markers, while rejecting editors, institutions, prose, and common subheadings.
 - Flag disagreements between contents, chapter-opening, and Crossref authors for source selection, with one action to confirm all non-conflicting candidates.
 - Edit, add, or remove chapter authors individually; manually edited authors take precedence over later automatic matching.
 - Switch the split preview between Chinese and English, with Chinese as the default.
