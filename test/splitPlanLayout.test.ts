@@ -9,6 +9,8 @@ describe("split preview table layout", function () {
       headerWhiteSpace: "nowrap",
       stickyTitleDivider: false,
       controlMargin: 0,
+      controlHeight: 30,
+      emptyDoiMessageDisplay: "none",
     });
   });
 });

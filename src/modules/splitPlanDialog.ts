@@ -1218,8 +1218,9 @@ export async function showSplitPlanDialog(
               th:nth-child(2), tbody tr:not(.chapterize-metadata-details-row) > td:nth-child(2) { position: sticky; left: 68px; z-index: 2; background: inherit; }
               th:nth-child(3), tbody tr:not(.chapterize-metadata-details-row) > td:nth-child(3) { position: sticky; left: 110px; z-index: 2; ${splitPlanTableLayout.stickyTitleDivider ? "border-inline-end: 1px solid var(--chapterize-border-strong); box-shadow: 5px 0 8px -8px var(--chapterize-ink);" : ""} background: inherit; }
               th:nth-child(-n+3) { z-index: 4; background: var(--chapterize-surface-subtle); }
-              td input[type="text"], td input[type="number"] { width: 100%; min-height: 30px; margin: ${splitPlanTableLayout.controlMargin}px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
+              td input[type="text"], td input[type="number"] { box-sizing: border-box; width: 100%; height: ${splitPlanTableLayout.controlHeight}px; min-height: ${splitPlanTableLayout.controlHeight}px; margin: ${splitPlanTableLayout.controlMargin}px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
               td input[type="checkbox"] { accent-color: var(--chapterize-blue); }
+              .chapterize-title-cell, .chapterize-doi-cell { vertical-align: middle; }
               .chapterize-title-cell { min-width: 0; padding-block: 6px; }
               .chapterize-title-cell input { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
               .chapterize-printed-pages { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -1248,6 +1249,7 @@ export async function showSplitPlanDialog(
               .chapterize-doi-lookup { width: 60px; min-height: 30px; padding: 3px 8px; border: 1px solid var(--chapterize-blue); border-radius: 4px; background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font: inherit; white-space: nowrap; }
               .chapterize-input-error { border-color: var(--chapterize-danger) !important; background: var(--chapterize-danger-soft) !important; }
               .chapterize-doi-message { min-height: 1.15em; margin-top: 4px; color: var(--chapterize-blue-ink); font-size: .88em; line-height: 1.2; }
+              .chapterize-doi-message:empty { display: ${splitPlanTableLayout.emptyDoiMessageDisplay}; }
               .chapterize-doi-message-error { color: var(--chapterize-danger); }
               .chapterize-metadata-details-row:hover { background: var(--chapterize-surface); }
               .chapterize-metadata-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 6px 14px; padding: 10px 12px; border-left: 3px solid var(--chapterize-blue); background: var(--chapterize-surface-subtle); }

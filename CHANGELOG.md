@@ -3,6 +3,20 @@
 All notable changes to Chapterize are documented here in Chinese and English.
 Chapterize 的重要更新均在此以中英文记录。
 
+## [0.2.27] - 2026-08-13
+
+### 中文
+
+- 将标题与 DOI 文本框统一为相同的 30px 高度和盒模型，并让两者在表格行内垂直居中对齐。
+- 空的 DOI 状态消息不再占据额外高度；仅在获取成功或发生错误时显示提示，避免 DOI 文本框向上偏移。
+- 增加布局回归测试，固定输入框高度与空消息区行为。
+
+### English
+
+- Standardized Title and DOI inputs on the same 30px height and box model, with both controls vertically centered in each table row.
+- Empty DOI status messages no longer reserve space; feedback appears only after a successful lookup or an error, preventing the DOI input from shifting upward.
+- Added layout regression coverage for input height and empty message behavior.
+
 ## [0.2.26] - 2026-08-13
 
 ### 中文
