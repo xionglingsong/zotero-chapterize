@@ -25,7 +25,9 @@
     "build": "zotero-plugin build && tsc --noEmit && node scripts/version-xpi.mjs",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
-    "release": "zotero-plugin release",
+    "release": "node scripts/release.mjs",
+    "release:check": "node scripts/finalize-release.mjs --check",
+    "release:ci": "node scripts/finalize-release.mjs --check && zotero-plugin release && node scripts/finalize-release.mjs",
     "test": "zotero-plugin test",
     "update-deps": "npm update --save"
   },
