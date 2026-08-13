@@ -3,6 +3,24 @@
 All notable changes to Chapterize are documented here in Chinese and English.
 Chapterize 的重要更新均在此以中英文记录。
 
+## [0.2.19] - 2026-08-13
+
+### 中文
+
+- 修复母书编者被错误继承为章节作者的问题；没有可靠来源时不再猜测章作者。
+- 接入 Crossref `book-chapter` 标题、书名与 ISBN 匹配，显示置信度并支持逐字段确认。
+- 第 33 章“Eye-tracking studies in conference interpreting”可匹配 Agnieszka Chmiel、DOI、页码等正确元数据。
+- 支持清理纯数字章节前缀，并新增“清理章节编号”设置和预览中的原始标题一键恢复。
+- 已有拆分章节可就地回填已确认的元数据，完成提示会报告更新章节数与字段数。
+
+### English
+
+- Fixed book editors being incorrectly inherited as chapter authors; chapter authors are no longer guessed without a reliable source.
+- Integrated Crossref `book-chapter` matching by title, book title, and ISBN, with confidence and field-level acceptance.
+- Chapter 33, “Eye-tracking studies in conference interpreting,” now matches Agnieszka Chmiel, its DOI, pages, and related metadata.
+- Added cleanup for bare numeric chapter prefixes, a title-cleanup preference, and one-click restoration of original bookmark titles.
+- Existing generated sections can receive accepted metadata in place, with completion notices reporting changed sections and fields.
+
 ## [0.2.18] - 2026-08-13
 
 ### 中文

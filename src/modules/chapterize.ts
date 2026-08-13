@@ -1,4 +1,5 @@
 import { getLocaleID, getString } from "../utils/locale";
+import { getPref } from "../utils/prefs";
 import {
   createOfficialMenuOptions,
   removeLegacyMenuElement,
@@ -21,10 +22,12 @@ import { showSplitPlanDialog } from "./splitPlanDialog";
 import {
   canWriteSplitTarget,
   createBookSectionWithPdf,
-  getExistingSectionKeys,
+  inspectExistingSections,
   makeChapterizeMarker,
   resolveSplitTarget,
   sectionKey,
+  updateExistingSection,
+  type ExistingSectionsResult,
   type SplitTarget,
 } from "./zotero/items";
 
@@ -162,6 +165,12 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
   let pageLabels: string[] = [];
   let sourceKey = "";
   let existingKeys = new Set<string>();
+  let existingSections: ExistingSectionsResult = {
+    keys: existingKeys,
+    sectionsByKey: new Map(),
+    repairedItems: 0,
+    repairedFields: 0,
+  };
   let splitPages: PdfPageSplitter;
   try {
     const raw: any = await io().read(pdfPath);
@@ -192,7 +201,12 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
     pageLabels = inspection.pageLabels;
     splitPages = pageSplitter;
     sourceKey = `${pdfAttachment.key}:${pdfFingerprint}`;
-    existingKeys = await getExistingSectionKeys(bookItem, sourceKey);
+    existingSections = await inspectExistingSections(
+      bookItem,
+      sourceKey,
+      getPref("cleanChapterNumbers") !== false,
+    );
+    existingKeys = existingSections.keys;
   } catch (e) {
     progress.changeLine({
       text: isEncryptedPdfError(e)
@@ -206,10 +220,23 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
   }
 
   progress.win.close();
+  if (existingSections.repairedItems > 0) {
+    notify(
+      getString("progress-metadata-repaired", {
+        args: {
+          items: existingSections.repairedItems,
+          fields: existingSections.repairedFields,
+        },
+      }),
+      "success",
+    );
+  }
   const chapters = await showSplitPlanDialog({
     detectedChapters,
     totalPages,
     pageLabels,
+    bookTitle: String(bookItem.getField("title")),
+    isbn: String(bookItem.getField("ISBN")),
     isExistingRange: (startPage, endPage) =>
       existingKeys.has(
         sectionKey({
@@ -236,15 +263,31 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
   let created = 0;
   let skipped = 0;
   let failed = 0;
+  let updated = 0;
+  let updatedFields = 0;
   for (let i = 0; i < chapters.length; i++) {
     const ch = chapters[i];
     const payload = {
       title: ch.title,
       pages: printedRange(pageLabels, ch.startPage, ch.endPage),
       sourceMarker: makeChapterizeMarker(sourceKey, ch.startPage, ch.endPage),
+      metadata: ch.metadata,
     };
     const key = sectionKey(payload);
     if (existingKeys.has(key)) {
+      const existingItem = existingSections.sectionsByKey.get(key);
+      if (existingItem) {
+        try {
+          const changes = await updateExistingSection(existingItem, payload);
+          if (changes > 0) {
+            updated++;
+            updatedFields += changes;
+          }
+        } catch (e) {
+          ztoolkit.log(`Failed to update section "${ch.title}"`, e);
+          failed++;
+        }
+      }
       skipped++;
       splitProgress.changeLine({
         text: `[${i + 1}/${chapters.length}] ${ch.title}`,
@@ -289,7 +332,7 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
 
   splitProgress.changeLine({
     text: getString("progress-done", {
-      args: { created, skipped, failed },
+      args: { created, updated, fields: updatedFields, skipped, failed },
     }),
     type: completionProgressType(failed),
     progress: 100,

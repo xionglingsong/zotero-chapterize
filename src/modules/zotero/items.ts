@@ -10,6 +10,7 @@ import {
   makeChapterizeMarker,
 } from "./itemsLogic";
 import { cleanChapterTitle } from "../splitPlanSelection";
+import type { CrossRefSectionMeta } from "../crossref";
 
 /**
  * Get the absolute filesystem path of a regular item's primary (best) PDF
@@ -64,6 +65,8 @@ export interface SectionPayload {
   /** Page range string, e.g. "12-27" (already in whatever scheme caller chose). */
   pages?: string;
   sourceMarker?: string;
+  /** Chapter-level metadata accepted by the user in the split preview. */
+  metadata?: Partial<CrossRefSectionMeta>;
 }
 
 const inheritedBookFields = [
@@ -87,22 +90,57 @@ function inheritBookMetadata(
   parent: Zotero.Item,
   section: Zotero.Item,
   onlyMissing = false,
-): boolean {
-  let changed = false;
-  const creators = parent.getCreatorsJSON().map((creator) => ({ ...creator }));
-  if (
-    creators.length > 0 &&
-    (!onlyMissing || section.getCreatorsJSON().length === 0)
-  ) {
-    section.setCreators(creators);
-    changed = true;
-  }
-
+): number {
+  let changed = 0;
   for (const field of inheritedBookFields) {
     const value = parent.getField(field);
     if (value !== "" && (!onlyMissing || section.getField(field) === "")) {
       section.setField(field, value);
-      changed = true;
+      changed++;
+    }
+  }
+  return changed;
+}
+
+const metadataFieldMap = {
+  bookTitle: "bookTitle",
+  pages: "pages",
+  date: "date",
+  publisher: "publisher",
+  isbn: "ISBN",
+  language: "language",
+  doi: "DOI",
+  url: "url",
+  libraryCatalog: "libraryCatalog",
+} as const;
+
+/** Apply only chapter metadata that the user explicitly accepted. */
+export function applySectionMetadata(
+  section: Zotero.Item,
+  metadata: Partial<CrossRefSectionMeta> | undefined,
+): number {
+  if (!metadata) return 0;
+  let changed = 0;
+  if (metadata.title && section.getField("title") !== metadata.title) {
+    section.setField("title", metadata.title);
+    changed++;
+  }
+  for (const [sourceField, zoteroField] of Object.entries(metadataFieldMap)) {
+    const value = metadata[sourceField as keyof typeof metadataFieldMap];
+    if (
+      typeof value === "string" &&
+      value &&
+      section.getField(zoteroField) !== value
+    ) {
+      section.setField(zoteroField, value);
+      changed++;
+    }
+  }
+  if (metadata.creators) {
+    const next = metadata.creators.map((creator) => ({ ...creator }));
+    if (JSON.stringify(section.getCreatorsJSON()) !== JSON.stringify(next)) {
+      section.setCreators(next);
+      changed++;
     }
   }
   return changed;
@@ -124,6 +162,7 @@ export async function createBookSection(
   inheritBookMetadata(parent, section);
   if (payload.pages) section.setField("pages", payload.pages);
   if (payload.sourceMarker) section.setField("extra", payload.sourceMarker);
+  applySectionMetadata(section, payload.metadata);
   await section.saveTx();
 
   try {
@@ -200,18 +239,31 @@ export function sectionKey(payload: SectionPayload): string {
 
 export { makeChapterizeMarker };
 
-/** Return reusable keys and fill missing book metadata on generated sections. */
-export async function getExistingSectionKeys(
+export interface ExistingSectionsResult {
+  keys: Set<string>;
+  sectionsByKey: Map<string, Zotero.Item>;
+  repairedItems: number;
+  repairedFields: number;
+}
+
+/** Inspect reusable generated sections and backfill safe book-level metadata. */
+export async function inspectExistingSections(
   parent: Zotero.Item,
   sourceKey: string,
-): Promise<Set<string>> {
-  const keys = new Set<string>();
+  cleanTitles = true,
+): Promise<ExistingSectionsResult> {
+  const result: ExistingSectionsResult = {
+    keys: new Set<string>(),
+    sectionsByKey: new Map<string, Zotero.Item>(),
+    repairedItems: 0,
+    repairedFields: 0,
+  };
   const search = new Zotero.Search();
   (search as any).libraryID = parent.libraryID;
   search.addCondition("itemType", "is", "bookSection");
   search.addCondition("extra", "contains", `Chapterize-Source: ${sourceKey}:`);
   const sectionIDs = await search.search();
-  if (sectionIDs.length === 0) return keys;
+  if (sectionIDs.length === 0) return result;
 
   const sections = await Zotero.Items.getAsync(sectionIDs);
   const attachmentIDs = sections.flatMap((item) => item.getAttachments());
@@ -231,35 +283,69 @@ export async function getExistingSectionKeys(
       .map((line) => line.trim())
       .find((line) => line.startsWith(`Chapterize-Source: ${sourceKey}:`));
     if (!sourceMarker) continue;
-
-    const hasPdfAttachment = sectionsWithPdf.has(item.id);
-    if (!isReusableChapterizeSection(extra, sourceMarker, hasPdfAttachment)) {
+    if (
+      !isReusableChapterizeSection(
+        extra,
+        sourceMarker,
+        sectionsWithPdf.has(item.id),
+      )
+    ) {
       continue;
     }
 
-    let changed = inheritBookMetadata(parent, item, true);
+    let fieldChanges = Number(inheritBookMetadata(parent, item, true));
     const currentTitle = String(item.getField("title"));
-    const cleanedTitle = cleanChapterTitle(currentTitle);
+    const cleanedTitle = cleanTitles
+      ? cleanChapterTitle(currentTitle)
+      : currentTitle;
     if (cleanedTitle !== currentTitle) {
       item.setField("title", cleanedTitle);
-      changed = true;
+      fieldChanges++;
     }
-    if (changed) {
+    if (fieldChanges > 0) {
       try {
         await item.saveTx();
+        result.repairedItems++;
+        result.repairedFields += fieldChanges;
       } catch (error) {
         ztoolkit.log("Failed to fill existing section metadata", error);
       }
     }
 
-    keys.add(
-      sectionKey({
-        title: String(item.getField("title")),
-        pages: String(item.getField("pages")),
-        sourceMarker,
-      }),
-    );
+    const key = sectionKey({
+      title: String(item.getField("title")),
+      pages: String(item.getField("pages")),
+      sourceMarker,
+    });
+    result.keys.add(key);
+    result.sectionsByKey.set(key, item);
   }
+  return result;
+}
 
-  return keys;
+/** Update an existing generated section with accepted chapter metadata. */
+export async function updateExistingSection(
+  item: Zotero.Item,
+  payload: SectionPayload,
+): Promise<number> {
+  let changes = 0;
+  const desiredTitle = payload.metadata?.title || payload.title;
+  if (desiredTitle && item.getField("title") !== desiredTitle) {
+    item.setField("title", desiredTitle);
+    changes++;
+  }
+  const metadata = payload.metadata
+    ? { ...payload.metadata, title: undefined }
+    : undefined;
+  changes += applySectionMetadata(item, metadata);
+  if (changes > 0) await item.saveTx();
+  return changes;
+}
+
+/** Return reusable keys and fill missing book metadata on generated sections. */
+export async function getExistingSectionKeys(
+  parent: Zotero.Item,
+  sourceKey: string,
+): Promise<Set<string>> {
+  return (await inspectExistingSections(parent, sourceKey)).keys;
 }

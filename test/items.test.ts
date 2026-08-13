@@ -3,7 +3,7 @@ import {
   attachPdfFile,
   createBookSection,
   createBookSectionWithPdf,
-  getExistingSectionKeys,
+  inspectExistingSections,
   sectionKey,
 } from "../src/modules/zotero/items";
 
@@ -72,7 +72,7 @@ describe("Zotero item creation", function () {
     };
 
     try {
-      const keys = await getExistingSectionKeys(
+      const inspected = await inspectExistingSections(
         {
           libraryID: 7,
           getField: (name: string) =>
@@ -90,7 +90,7 @@ describe("Zotero item creation", function () {
         sourceKey,
       );
       assert.deepEqual(
-        [...keys],
+        [...inspected.keys],
         [sectionKey({ title: "Chapter", pages: "1-10", sourceMarker })],
       );
       assert.deepEqual(conditions, [
@@ -100,14 +100,10 @@ describe("Zotero item creation", function () {
       assert.equal(repairedFields.get("publisher"), "Routledge");
       assert.equal(repairedFields.get("language"), "en");
       assert.equal(repairedFields.get("title"), "Research methods");
-      assert.deepEqual(repairedCreators, [
-        {
-          creatorType: "editor",
-          firstName: "Ada",
-          lastName: "Editor",
-        },
-      ]);
+      assert.deepEqual(repairedCreators, []);
       assert.equal(repairSaves, 1);
+      assert.equal(inspected.repairedItems, 1);
+      assert.equal(inspected.repairedFields, 3);
     } finally {
       (globalThis as any).Zotero = originalZotero;
     }
@@ -218,16 +214,77 @@ describe("Zotero item creation", function () {
       assert.equal(section.getField("DOI"), "");
       assert.equal(section.getField("url"), "");
       assert.equal(section.getField("extra"), "");
-      assert.deepEqual(
-        (section as unknown as MockItem).creators,
-        parentCreators,
-      );
-      assert.notStrictEqual(
-        (section as unknown as MockItem).creators[0],
-        parentCreators[0],
-      );
+      assert.deepEqual((section as unknown as MockItem).creators, []);
       assert.deepEqual((section as unknown as MockItem).related, [parent]);
       assert.deepEqual(parentRelated, [section]);
+    } finally {
+      (globalThis as any).Zotero = originalZotero;
+    }
+  });
+
+  it("writes accepted Crossref chapter authors instead of parent editors", async function () {
+    const originalZotero = (globalThis as any).Zotero;
+    class MockItem {
+      id = 99;
+      libraryID: number | null = null;
+      fields = new Map<string, string>();
+      creators: unknown[] = [];
+      setField(name: string, value: string) {
+        this.fields.set(name, value);
+      }
+      getField(name: string) {
+        return this.fields.get(name) ?? "";
+      }
+      setCreators(creators: unknown[]) {
+        this.creators = creators;
+      }
+      getCreatorsJSON() {
+        return this.creators;
+      }
+      addRelatedItem() {}
+      async saveTx() {}
+    }
+    (globalThis as any).Zotero = { Item: MockItem };
+    const parent = {
+      id: 42,
+      libraryID: 7,
+      getField: (name: string) => (name === "title" ? "Handbook" : ""),
+      getCreatorsJSON: () => [
+        { creatorType: "author", firstName: "Book", lastName: "Editor" },
+      ],
+      addRelatedItem: () => {},
+      removeRelatedItem: () => {},
+      saveTx: async () => {},
+    } as unknown as Zotero.Item;
+
+    try {
+      const section = (await createBookSection(parent, {
+        title: "33 Eye-tracking studies in conference interpreting",
+        metadata: {
+          title: "Eye-tracking studies in conference interpreting",
+          creators: [
+            {
+              creatorType: "author",
+              firstName: "Agnieszka",
+              lastName: "Chmiel",
+            },
+          ],
+          doi: "10.4324/9780429297878-40",
+        },
+      })) as unknown as MockItem;
+
+      assert.equal(
+        section.getField("title"),
+        "Eye-tracking studies in conference interpreting",
+      );
+      assert.equal(section.getField("DOI"), "10.4324/9780429297878-40");
+      assert.deepEqual(section.creators, [
+        {
+          creatorType: "author",
+          firstName: "Agnieszka",
+          lastName: "Chmiel",
+        },
+      ]);
     } finally {
       (globalThis as any).Zotero = originalZotero;
     }

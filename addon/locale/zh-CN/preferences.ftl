@@ -1,5 +1,5 @@
-pref-title = 插件模板设置示例
-pref-enable =
-    .label = 开启
-pref-input = 输入
+pref-title = Chapterize
+pref-description = 设置拆分前如何整理章节元数据。
+pref-clean-chapter-numbers =
+    .label = 默认清理标题开头的章节编号
 pref-help = { $name } Build { $version } { $time }

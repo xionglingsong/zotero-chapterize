@@ -14,6 +14,10 @@ describe("split plan recommendations", function () {
     );
     assert.equal(cleanChapterTitle("Ch. IV — Results"), "Results");
     assert.equal(cleanChapterTitle("第五章 研究方法"), "研究方法");
+    assert.equal(
+      cleanChapterTitle("33 Eye-tracking studies in conference interpreting"),
+      "Eye-tracking studies in conference interpreting",
+    );
   });
 
   it("keeps a chapter number when no real title follows it", function () {

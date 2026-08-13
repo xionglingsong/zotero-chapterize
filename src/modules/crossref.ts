@@ -1,14 +1,7 @@
-/**
- * CrossRef integration.
- *
- * Not wired into the M2 split flow yet — the M3 preview dialog will call
- * `fetchSectionByDoi` per chapter (user-entered DOI) and `searchSectionByTitle`
- * for the "auto-match all" button. Field mapping follows the Zotero
- * `bookSection` item type.
- */
+import { cleanChapterTitle } from "./splitPlanSelection";
 
 export interface ZoteroCreator {
-  creatorType: string;
+  creatorType: "author";
   firstName?: string;
   lastName?: string;
 }
@@ -23,82 +16,166 @@ export interface CrossRefSectionMeta {
   isbn?: string;
   language?: string;
   doi?: string;
+  url?: string;
+  libraryCatalog?: string;
+}
+
+export type CrossRefConfidence = "high" | "medium" | "low";
+
+export interface CrossRefMatch {
+  metadata: CrossRefSectionMeta;
+  confidence: number;
+  confidenceLevel: CrossRefConfidence;
+  titleSimilarity: number;
+  bookSimilarity: number;
 }
 
 const API = "https://api.crossref.org/works";
-// CrossRef asks for a descriptive User-Agent with mailto for polite pooling.
 const UA =
   "Chapterize Zotero plugin (https://github.com/xionglingsong/zotero-chapterize; mailto:noreply@example.com)";
 
 async function getJson(url: string): Promise<any | null> {
   try {
-    const res = await fetch(url, {
+    const request = (Zotero as any)?.HTTP?.request;
+    if (typeof request === "function") {
+      const response = await request("GET", url, {
+        headers: { "User-Agent": UA, Accept: "application/json" },
+        responseType: "json",
+      });
+      return response.response;
+    }
+    const response = await fetch(url, {
       headers: { "User-Agent": UA, Accept: "application/json" },
     });
-    if (!res.ok) return null;
-    return await res.json();
+    return response.ok ? await response.json() : null;
   } catch {
     return null;
   }
 }
 
-function mapMessage(m: any): CrossRefSectionMeta | null {
+function firstString(value: unknown): string | undefined {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  if (typeof candidate !== "string") return undefined;
+  const cleaned = candidate.replace(/\s+/g, " ").trim();
+  return cleaned || undefined;
+}
+
+export function mapCrossRefMessage(m: any): CrossRefSectionMeta | null {
   if (!m) return null;
-  const title: string = Array.isArray(m.title)
-    ? (m.title[0] ?? "")
-    : (m.title ?? "");
-  const creators: ZoteroCreator[] = (m.author ?? []).map((a: any) => ({
-    creatorType: "author",
-    firstName: a.given,
-    lastName: a.family,
-  }));
-  const bookTitle: string | undefined = Array.isArray(m["container-title"])
-    ? m["container-title"]?.[0]
-    : m["container-title"];
-  const dateRaw =
+  const title = firstString(m.title) ?? "";
+  if (!title) return null;
+  const creators: ZoteroCreator[] = (Array.isArray(m.author) ? m.author : [])
+    .map((author: any) => ({
+      creatorType: "author" as const,
+      firstName: firstString(author?.given),
+      lastName: firstString(author?.family),
+    }))
+    .filter((creator: ZoteroCreator) => creator.firstName || creator.lastName);
+  const dateParts =
     m["published-print"]?.["date-parts"]?.[0] ??
     m["published-online"]?.["date-parts"]?.[0] ??
     m.issued?.["date-parts"]?.[0];
-  const date = Array.isArray(dateRaw) ? dateRaw.join("-") : dateRaw;
-  const isbn: string | undefined = (m.ISBN ?? [])?.[0];
   return {
     title,
     creators,
-    bookTitle,
-    pages: m.page,
-    date,
-    publisher: m.publisher,
-    isbn,
-    language: m.language,
-    doi: m.DOI,
+    bookTitle: firstString(m["container-title"]),
+    pages: firstString(m.page),
+    date: Array.isArray(dateParts) ? dateParts.join("-") : undefined,
+    publisher: firstString(m.publisher),
+    isbn: firstString(m.ISBN),
+    language: firstString(m.language),
+    doi: firstString(m.DOI),
+    url: firstString(m.URL),
+    libraryCatalog: m.DOI ? "DOI.org (Crossref)" : undefined,
   };
 }
 
-/** Look up a single chapter by DOI. Returns null on miss/network error. */
+function normalized(value: string): string {
+  return cleanChapterTitle(value)
+    .normalize("NFKD")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function similarity(left: string, right: string): number {
+  const a = normalized(left);
+  const b = normalized(right);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const aTokens = new Set(a.split(" "));
+  const bTokens = new Set(b.split(" "));
+  const intersection = [...aTokens].filter((token) =>
+    bTokens.has(token),
+  ).length;
+  const union = new Set([...aTokens, ...bTokens]).size;
+  return union ? intersection / union : 0;
+}
+
+export function chooseCrossRefMatch(
+  chapterTitle: string,
+  bookTitle: string | undefined,
+  messages: any[],
+): CrossRefMatch | null {
+  const candidates = messages
+    .map((message) => {
+      const metadata = mapCrossRefMessage(message);
+      if (!metadata) return null;
+      const titleSimilarity = similarity(chapterTitle, metadata.title);
+      const bookSimilarity = bookTitle
+        ? similarity(bookTitle, metadata.bookTitle ?? "")
+        : 0.75;
+      const confidence = titleSimilarity * 0.82 + bookSimilarity * 0.18;
+      return { metadata, confidence, titleSimilarity, bookSimilarity };
+    })
+    .filter((match): match is Omit<CrossRefMatch, "confidenceLevel"> => !!match)
+    .sort((a, b) => b.confidence - a.confidence);
+  const best = candidates[0];
+  if (!best || best.titleSimilarity < 0.58 || best.confidence < 0.62)
+    return null;
+  return {
+    ...best,
+    confidenceLevel:
+      best.confidence >= 0.9
+        ? "high"
+        : best.confidence >= 0.75
+          ? "medium"
+          : "low",
+  };
+}
+
+/** Look up a single chapter by DOI. */
 export async function fetchSectionByDoi(
   doi: string,
 ): Promise<CrossRefSectionMeta | null> {
   const json = await getJson(`${API}/${encodeURIComponent(doi.trim())}`);
-  return mapMessage(json?.message);
+  return mapCrossRefMessage(json?.message);
 }
 
-/**
- * Best-effort title match for a chapter inside a book. `bookTitle`/`isbn`
- * improve precision when available. Returns the top hit or null.
- */
+/** Match a chapter title against Crossref book-chapter records. */
 export async function searchSectionByTitle(
   chapterTitle: string,
   opts: { bookTitle?: string; isbn?: string } = {},
-): Promise<CrossRefSectionMeta | null> {
+): Promise<CrossRefMatch | null> {
   const params = new URLSearchParams({
-    "query.bibliographic": chapterTitle,
-    rows: "1",
+    "query.title": cleanChapterTitle(chapterTitle),
+    rows: "5",
   });
   if (opts.bookTitle) params.set("query.container-title", opts.bookTitle);
-  const filterParts = ["type:book-section"];
-  if (opts.isbn) filterParts.push(`isbn:${opts.isbn}`);
-  params.set("filter", filterParts.join(","));
-  const json = await getJson(`${API}?${params.toString()}`);
-  const item = json?.message?.items?.[0];
-  return mapMessage(item);
+  const filters = ["type:book-chapter"];
+  const isbn = opts.isbn?.replace(/[^0-9X]/gi, "");
+  if (isbn && (isbn.length === 10 || isbn.length === 13)) {
+    filters.push(`isbn:${isbn}`);
+  }
+  params.set("filter", filters.join(","));
+  let json = await getJson(`${API}?${params.toString()}`);
+  if (filters.length > 1 && !json?.message?.items?.length) {
+    params.set("filter", "type:book-chapter");
+    json = await getJson(`${API}?${params.toString()}`);
+  }
+  return chooseCrossRefMatch(
+    chapterTitle,
+    opts.bookTitle,
+    json?.message?.items ?? [],
+  );
 }

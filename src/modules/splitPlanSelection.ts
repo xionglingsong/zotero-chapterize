@@ -18,12 +18,16 @@ const englishChapterPrefix =
   /^\s*(?:chapter|chap\.?|ch\.?)\s+(?:\d+|[ivxlcdm]+)(?:\s*[:：.\-–—]\s*|\s+)(.+)$/i;
 const chineseChapterPrefix =
   /^\s*第\s*[0-9一二三四五六七八九十百零〇两]+\s*章(?:\s*[:：.\-–—]\s*|\s*)(.+)$/i;
+const bareChapterNumberPrefix =
+  /^\s*\d{1,3}(?:\s*[:：.\-–—]\s*|\s+)(?=\p{L})(.+)$/u;
 
 /** Remove a structural chapter-number prefix while preserving the real title. */
 export function cleanChapterTitle(title: string): string {
   const trimmed = title.trim();
   const match =
-    englishChapterPrefix.exec(trimmed) ?? chineseChapterPrefix.exec(trimmed);
+    englishChapterPrefix.exec(trimmed) ??
+    chineseChapterPrefix.exec(trimmed) ??
+    bareChapterNumberPrefix.exec(trimmed);
   const cleaned = match?.[1]?.trim();
   return cleaned || trimmed;
 }

@@ -1,4 +1,10 @@
 import { getString } from "../utils/locale";
+import { getPref, setPref } from "../utils/prefs";
+import {
+  searchSectionByTitle,
+  type CrossRefMatch,
+  type CrossRefSectionMeta,
+} from "./crossref";
 import type { Chapter } from "./pdf/outline";
 import {
   normalizeSplitPlan,
@@ -17,6 +23,17 @@ interface EditableRow extends Chapter {
   id: number;
   enabled: boolean;
   detectedEndPage: number;
+  originalTitle: string;
+  metadataMatch?: CrossRefMatch | null;
+  metadataLoading?: boolean;
+  metadataExpanded?: boolean;
+  acceptedFields: Set<MetadataField>;
+}
+
+type MetadataField = keyof CrossRefSectionMeta;
+
+export interface ChapterPlan extends Chapter {
+  metadata?: Partial<CrossRefSectionMeta>;
 }
 
 export interface SplitPlanDialogInput {
@@ -24,6 +41,8 @@ export interface SplitPlanDialogInput {
   totalPages: number;
   pageLabels: string[];
   isExistingRange(startPage: number, endPage: number): boolean;
+  bookTitle?: string;
+  isbn?: string;
 }
 
 const ids = {
@@ -36,13 +55,17 @@ const ids = {
   selectAll: "chapterize-plan-select-all",
   selectNone: "chapterize-plan-select-none",
   invert: "chapterize-plan-invert",
+  cleanTitles: "chapterize-plan-clean-titles",
+  restoreTitles: "chapterize-plan-restore-titles",
+  matchAll: "chapterize-plan-match-all",
 };
 
 /** Show the complete split-plan editor and return only a validated plan. */
 export async function showSplitPlanDialog(
   input: SplitPlanDialogInput,
-): Promise<Chapter[] | null> {
+): Promise<ChapterPlan[] | null> {
   let nextID = 1;
+  let cleanTitles = getPref("cleanChapterNumbers") !== false;
   const fromDetected = () => {
     const recommended = recommendedSplitSelection(input.detectedChapters);
     const recommendedEnds = recommendedRangeEndPages(
@@ -52,15 +75,17 @@ export async function showSplitPlanDialog(
     );
     return input.detectedChapters.map((chapter, index) => ({
       ...chapter,
-      title: cleanChapterTitle(chapter.title),
+      title: cleanTitles ? cleanChapterTitle(chapter.title) : chapter.title,
       endPage: recommendedEnds[index] ?? chapter.endPage,
       id: nextID++,
       enabled: recommended[index] ?? true,
       detectedEndPage: chapter.endPage,
+      originalTitle: chapter.title,
+      acceptedFields: new Set<MetadataField>(),
     }));
   };
   let rows: EditableRow[] = fromDetected();
-  let result: Chapter[] | null = null;
+  let result: ChapterPlan[] | null = null;
 
   const dialog = new ztoolkit.Dialog(1, 1);
   const data: Record<string, any> = {
@@ -69,6 +94,94 @@ export async function showSplitPlanDialog(
 
   function selectedRows(): EditableRow[] {
     return rows.filter((row) => row.enabled);
+  }
+
+  function toChapter(row: EditableRow): Chapter {
+    return {
+      title: row.title,
+      level: row.level,
+      startPage: row.startPage,
+      endPage: row.endPage,
+    };
+  }
+
+  const metadataFields: MetadataField[] = [
+    "title",
+    "creators",
+    "doi",
+    "url",
+    "libraryCatalog",
+    "bookTitle",
+    "pages",
+    "date",
+    "publisher",
+    "isbn",
+    "language",
+  ];
+  const defaultAcceptedFields = new Set<MetadataField>([
+    "title",
+    "creators",
+    "doi",
+    "url",
+    "libraryCatalog",
+    "pages",
+    "date",
+  ]);
+
+  function metadataValue(
+    metadata: CrossRefSectionMeta,
+    field: MetadataField,
+  ): string {
+    if (field === "creators") {
+      return metadata.creators
+        .map((creator) =>
+          [creator.lastName, creator.firstName].filter(Boolean).join(", "),
+        )
+        .join("; ");
+    }
+    return String(metadata[field] ?? "");
+  }
+
+  function acceptedMetadata(
+    row: EditableRow,
+  ): Partial<CrossRefSectionMeta> | undefined {
+    const metadata = row.metadataMatch?.metadata;
+    if (!metadata || row.acceptedFields.size === 0) return undefined;
+    const accepted: Partial<CrossRefSectionMeta> = {};
+    for (const field of row.acceptedFields) {
+      (accepted as any)[field] = metadata[field];
+    }
+    return accepted;
+  }
+
+  async function matchRow(row: EditableRow, doc: Document): Promise<void> {
+    row.metadataLoading = true;
+    render(doc);
+    row.metadataMatch = await searchSectionByTitle(row.title, {
+      bookTitle: input.bookTitle,
+      isbn: input.isbn,
+    });
+    row.metadataLoading = false;
+    row.metadataExpanded = !!row.metadataMatch;
+    row.acceptedFields = new Set(
+      row.metadataMatch
+        ? metadataFields.filter(
+            (field) =>
+              defaultAcceptedFields.has(field) &&
+              metadataValue(row.metadataMatch!.metadata, field) !== "",
+          )
+        : [],
+    );
+    render(doc);
+  }
+
+  async function matchAll(doc: Document): Promise<void> {
+    const pending = selectedRows();
+    for (let index = 0; index < pending.length; index += 3) {
+      await Promise.all(
+        pending.slice(index, index + 3).map((row) => matchRow(row, doc)),
+      );
+    }
   }
 
   function setSelection(
@@ -123,9 +236,7 @@ export async function showSplitPlanDialog(
 
   function refreshStatus(doc: Document): SplitPlanIssue[] {
     const selected = selectedRows();
-    const chapters = selected.map(
-      ({ id: _id, enabled: _enabled, detectedEndPage: _end, ...row }) => row,
-    );
+    const chapters = selected.map(toChapter);
     const issues = validateSplitPlan(chapters, input.totalPages);
     const summary = summarizeSplitPlan(chapters, input.totalPages);
     const existing = selected.filter((row) =>
@@ -226,6 +337,35 @@ export async function showSplitPlanDialog(
       titleCell.append(title);
       tr.append(titleCell);
 
+      const metadataCell = doc.createElement("td");
+      metadataCell.className = "chapterize-metadata-cell";
+      const matchButton = doc.createElement("button");
+      matchButton.type = "button";
+      matchButton.className = "chapterize-match";
+      matchButton.disabled = !!row.metadataLoading;
+      matchButton.textContent = row.metadataLoading
+        ? getString("dialog-metadata-searching")
+        : row.metadataMatch
+          ? getString("dialog-metadata-confidence", {
+              args: {
+                confidence: Math.round(row.metadataMatch.confidence * 100),
+              },
+            })
+          : row.metadataMatch === null
+            ? getString("dialog-metadata-none")
+            : getString("dialog-metadata-find");
+      matchButton.title = getString("dialog-metadata-find-title");
+      matchButton.addEventListener("click", () => {
+        if (row.metadataMatch) {
+          row.metadataExpanded = !row.metadataExpanded;
+          render(doc);
+        } else {
+          void matchRow(row, doc);
+        }
+      });
+      metadataCell.append(matchButton);
+      tr.append(metadataCell);
+
       const printedPages = makeCell(doc, displayedPrintedRange(row));
       printedPages.className = "chapterize-printed-pages";
       printedPages.title = printedPages.textContent ?? "";
@@ -291,6 +431,47 @@ export async function showSplitPlanDialog(
       tr.append(actions);
       tr.classList.toggle("chapterize-row-disabled", !row.enabled);
       body.append(tr);
+
+      if (row.metadataExpanded && row.metadataMatch) {
+        const detailsRow = doc.createElement("tr");
+        detailsRow.className = "chapterize-metadata-details-row";
+        const detailsCell = doc.createElement("td");
+        detailsCell.colSpan = 10;
+        const details = doc.createElement("div");
+        details.className = "chapterize-metadata-details";
+        const heading = doc.createElement("strong");
+        heading.textContent = getString("dialog-metadata-review", {
+          args: {
+            confidence: Math.round(row.metadataMatch.confidence * 100),
+          },
+        });
+        details.append(heading);
+        for (const field of metadataFields) {
+          const value = metadataValue(row.metadataMatch.metadata, field);
+          if (!value) continue;
+          const label = doc.createElement("label");
+          label.className = "chapterize-metadata-field";
+          const accept = doc.createElement("input");
+          accept.type = "checkbox";
+          accept.checked = row.acceptedFields.has(field);
+          accept.addEventListener("change", () => {
+            if (accept.checked) row.acceptedFields.add(field);
+            else row.acceptedFields.delete(field);
+          });
+          const name = doc.createElement("span");
+          name.className = "chapterize-metadata-name";
+          name.textContent = getString(`dialog-metadata-field-${field}` as any);
+          const fieldValue = doc.createElement("span");
+          fieldValue.className = "chapterize-metadata-value";
+          fieldValue.textContent = value;
+          fieldValue.title = value;
+          label.append(accept, name, fieldValue);
+          details.append(label);
+        }
+        detailsCell.append(details);
+        detailsRow.append(detailsCell);
+        body.append(detailsRow);
+      }
     });
     refreshStatus(doc);
   }
@@ -348,11 +529,12 @@ export async function showSplitPlanDialog(
               tbody tr:last-child td { border-bottom: 0; }
               th:nth-child(1), td:nth-child(1) { width: 68px; text-align: center; }
               th:nth-child(2), td:nth-child(2) { width: 42px; color: var(--chapterize-muted); }
-              th:nth-child(4), td:nth-child(4), th:nth-child(5), td:nth-child(5) { width: 92px; }
-              th:nth-child(6), td:nth-child(6) { width: 118px; }
-              th:nth-child(7), td:nth-child(7) { width: 64px; }
-              th:nth-child(8), td:nth-child(8) { width: 82px; }
-              th:nth-child(9), td:nth-child(9) { width: 88px; }
+              th:nth-child(4), td:nth-child(4) { width: 110px; }
+              th:nth-child(5), td:nth-child(5), th:nth-child(6), td:nth-child(6) { width: 92px; }
+              th:nth-child(7), td:nth-child(7) { width: 118px; }
+              th:nth-child(8), td:nth-child(8) { width: 64px; }
+              th:nth-child(9), td:nth-child(9) { width: 82px; }
+              th:nth-child(10), td:nth-child(10) { width: 88px; }
               td input[type="text"], td input[type="number"] { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
               td input[type="checkbox"] { accent-color: var(--chapterize-blue); }
               .chapterize-title-cell { padding-block: 6px; }
@@ -367,6 +549,15 @@ export async function showSplitPlanDialog(
               .chapterize-errors { min-height: 0; padding: 8px 10px; border: 1px solid color-mix(in oklch, var(--chapterize-danger) 35%, white); border-radius: var(--chapterize-radius); background: var(--chapterize-danger-soft); color: var(--chapterize-danger); }
               .chapterize-errors[hidden] { display: none; }
               .chapterize-delete { width: 100%; padding: 3px 8px; color: var(--chapterize-muted); }
+              .chapterize-clean-toggle { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 4px; color: var(--chapterize-ink); white-space: nowrap; }
+              .chapterize-clean-toggle input { accent-color: var(--chapterize-blue); }
+              .chapterize-match { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font: inherit; }
+              .chapterize-metadata-details-row:hover { background: var(--chapterize-surface); }
+              .chapterize-metadata-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 6px 14px; padding: 10px 12px; border-left: 3px solid var(--chapterize-blue); background: var(--chapterize-surface-subtle); }
+              .chapterize-metadata-details > strong { grid-column: 1 / -1; color: var(--chapterize-blue-ink); }
+              .chapterize-metadata-field { display: grid; grid-template-columns: auto 76px minmax(0, 1fr); align-items: start; gap: 6px; min-width: 0; }
+              .chapterize-metadata-name { color: var(--chapterize-muted); }
+              .chapterize-metadata-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
               #split, #cancel { min-width: 84px; padding: 5px 14px; }
               #split { border-color: var(--chapterize-blue); background: var(--chapterize-blue); color: white; font-weight: 650; }
               #split:hover { border-color: var(--chapterize-blue-hover); background: var(--chapterize-blue-hover); }
@@ -469,6 +660,73 @@ export async function showSplitPlanDialog(
               attributes: { "aria-hidden": "true" },
             },
             {
+              tag: "label",
+              classList: ["chapterize-clean-toggle"],
+              children: [
+                {
+                  tag: "input",
+                  id: ids.cleanTitles,
+                  attributes: { type: "checkbox" },
+                  properties: { checked: cleanTitles },
+                  listeners: [
+                    {
+                      type: "change",
+                      listener: (event: Event) => {
+                        cleanTitles = (event.target as HTMLInputElement)
+                          .checked;
+                        setPref("cleanChapterNumbers", cleanTitles);
+                        rows.forEach((row) => {
+                          row.title = cleanTitles
+                            ? cleanChapterTitle(row.originalTitle)
+                            : row.originalTitle;
+                        });
+                        render(dialog.window.document);
+                      },
+                    },
+                  ],
+                },
+                {
+                  tag: "span",
+                  properties: {
+                    textContent: getString("dialog-clean-chapter-numbers"),
+                  },
+                },
+              ],
+            },
+            {
+              tag: "button",
+              id: ids.restoreTitles,
+              attributes: { type: "button" },
+              properties: {
+                textContent: getString("dialog-restore-original-titles"),
+              },
+              listeners: [
+                {
+                  type: "click",
+                  listener: () => {
+                    cleanTitles = false;
+                    setPref("cleanChapterNumbers", false);
+                    rows.forEach((row) => (row.title = row.originalTitle));
+                    render(dialog.window.document);
+                  },
+                },
+              ],
+            },
+            {
+              tag: "button",
+              id: ids.matchAll,
+              attributes: { type: "button" },
+              properties: {
+                textContent: getString("dialog-metadata-match-all"),
+              },
+              listeners: [
+                {
+                  type: "click",
+                  listener: () => void matchAll(dialog.window.document),
+                },
+              ],
+            },
+            {
               tag: "button",
               id: ids.add,
               attributes: { type: "button" },
@@ -492,6 +750,10 @@ export async function showSplitPlanDialog(
                       startPage: start,
                       endPage: start,
                       detectedEndPage: start,
+                      originalTitle: getString("dialog-new-section", {
+                        args: { number: rows.length + 1 },
+                      }),
+                      acceptedFields: new Set<MetadataField>(),
                     });
                     render(dialog.window.document);
                   },
@@ -539,6 +801,7 @@ export async function showSplitPlanDialog(
                         "dialog-col-include",
                         "dialog-col-number",
                         "dialog-col-title",
+                        "dialog-col-metadata",
                         "dialog-col-start",
                         "dialog-col-end",
                         "dialog-col-printed",
@@ -571,11 +834,18 @@ export async function showSplitPlanDialog(
       callback: () => {
         const issues = refreshStatus(dialog.window.document);
         if (issues.length > 0) return;
-        result = normalizeSplitPlan(
-          selectedRows().map(
-            ({ id: _id, enabled: _enabled, detectedEndPage: _end, ...row }) =>
-              row,
-          ),
+        result = normalizeSplitPlan(selectedRows().map(toChapter)).map(
+          (chapter) => {
+            const row = selectedRows().find(
+              (candidate) =>
+                candidate.startPage === chapter.startPage &&
+                candidate.endPage === chapter.endPage,
+            );
+            return {
+              ...chapter,
+              metadata: row ? acceptedMetadata(row) : undefined,
+            };
+          },
         );
         dialog.window.close();
       },
