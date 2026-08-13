@@ -1,7 +1,7 @@
 {
   "name": "chapterize",
   "type": "module",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "description": "Preview and split a book PDF by bookmarks or page ranges into Zotero Book Section items.",
   "config": {
     "addonName": "Chapterize",
