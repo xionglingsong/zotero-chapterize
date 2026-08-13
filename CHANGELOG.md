@@ -3,6 +3,26 @@
 All notable changes to Chapterize are documented here in Chinese and English.
 Chapterize 的重要更新均在此以中英文记录。
 
+## [0.2.22] - 2026-08-13
+
+### 中文
+
+- 按选择、标题、元数据和结构操作重新梳理拆分预览的信息层级，增加组间留白并保持紧凑的 Zotero 工具风格。
+- 横向滚动时固定启用、序号和标题列，长标题始终保留上下文；缩小次要列宽并优化窄窗口布局。
+- 将元数据状态改为“查找中、需要 DOI、匹配率”等可执行提示，将条目状态改为“将新建、将更新”，并提供明确的下一步说明。
+- 为 DOI 错误、结果摘要、表格和字段预览补充读屏语义、键盘焦点、强制配色和减少动态效果支持。
+- 修复批量清理或恢复标题后仍保留旧 Crossref 标题匹配的问题；DOI 精确匹配会保留，但不再覆盖用户编辑后的标题。
+- 将“删除”改为更准确的“移除”，明确该操作只影响当前拆分计划，不会删除原 PDF。
+
+### English
+
+- Reorganized the split preview around selection, title, metadata, and structure actions, with clearer grouping while preserving Zotero's compact tool style.
+- Kept the Include, number, and title columns visible during horizontal scrolling, reduced secondary column widths, and improved narrow-window behavior.
+- Replaced opaque metadata and item states with actionable labels such as Searching, DOI needed, match confidence, Will create, and Will update, each with recovery guidance.
+- Added screen-reader semantics for DOI errors, summaries, tables, and field previews, plus stronger keyboard focus, forced-colors, and reduced-motion support.
+- Fixed stale Crossref title matches surviving batch title cleanup or restoration; exact DOI metadata remains available without overwriting a user-edited title.
+- Renamed Delete to Remove and clarified that it only changes the current split plan, never the source PDF.
+
 ## [0.2.21] - 2026-08-13
 
 ### 中文

@@ -26,6 +26,11 @@ import {
   splitPlanText,
   type SplitPlanLanguage,
 } from "./splitPlanLocale";
+import {
+  metadataStatusPresentation,
+  sectionStatusPresentation,
+  shouldDiscardTitleMatch,
+} from "./splitPlanPresentation";
 
 interface EditableRow extends Chapter {
   id: number;
@@ -188,6 +193,19 @@ export async function showSplitPlanDialog(
       (accepted as any)[field] = metadata[field];
     }
     return accepted;
+  }
+
+  function changeRowTitle(row: EditableRow, nextTitle: string): void {
+    if (shouldDiscardTitleMatch(row.metadataSource, row.title, nextTitle)) {
+      row.metadataMatch = undefined;
+      row.metadataSource = undefined;
+      row.metadataExpanded = false;
+      row.acceptedFields.clear();
+      row.manualDoi = "";
+    } else if (row.metadataSource === "doi" && row.title !== nextTitle) {
+      row.acceptedFields.delete("title");
+    }
+    row.title = nextTitle;
   }
 
   function applyMatch(
@@ -376,6 +394,20 @@ export async function showSplitPlanDialog(
     return cell;
   }
 
+  function updateSectionStatus(
+    status: HTMLTableCellElement,
+    existing: boolean,
+  ): void {
+    const presentation = sectionStatusPresentation(existing);
+    status.textContent = getString(presentation.labelKey);
+    status.title = getString(presentation.helpKey);
+    status.setAttribute(
+      "aria-label",
+      `${getString(presentation.labelKey)}. ${getString(presentation.helpKey)}`,
+    );
+    status.className = `chapterize-status chapterize-status-${presentation.tone}`;
+  }
+
   function displayedPrintedRange(row: EditableRow): string {
     if (
       !Number.isInteger(row.startPage) ||
@@ -439,9 +471,19 @@ export async function showSplitPlanDialog(
       "--chapterize-title-width",
       `${titleColumnWidth}px`,
     );
+    const cleanButton = doc.getElementById(ids.cleanTitles);
+    cleanButton?.setAttribute("aria-pressed", String(cleanTitles));
+    cleanButton?.classList.toggle("chapterize-button-active", cleanTitles);
     doc.querySelectorAll("[data-i18n-key]").forEach((node: Element) => {
       const element = node as HTMLElement;
       element.textContent = getString(element.dataset.i18nKey ?? "");
+    });
+    doc.querySelectorAll("[data-i18n-aria-label]").forEach((node: Element) => {
+      const element = node as HTMLElement;
+      element.setAttribute(
+        "aria-label",
+        getString(element.dataset.i18nAriaLabel ?? ""),
+      );
     });
     const title = getString("dialog-title");
     doc.title = title;
@@ -484,15 +526,8 @@ export async function showSplitPlanDialog(
       title.value = row.title;
       title.title = row.title;
       title.addEventListener("input", () => {
-        row.title = title.value;
+        changeRowTitle(row, title.value);
         title.title = title.value;
-        if (row.metadataSource === "title") {
-          row.metadataMatch = undefined;
-          row.metadataSource = undefined;
-          row.metadataExpanded = false;
-          row.acceptedFields.clear();
-          row.manualDoi = "";
-        }
         refreshStatus(doc);
       });
       titleCell.append(title);
@@ -504,16 +539,37 @@ export async function showSplitPlanDialog(
       doiControls.className = "chapterize-doi-controls";
       const doiInput = doc.createElement("input");
       doiInput.type = "text";
+      doiInput.id = `chapterize-doi-${row.id}`;
       doiInput.value = row.manualDoi;
       doiInput.placeholder = getString("dialog-doi-placeholder");
       doiInput.setAttribute("aria-label", getString("dialog-col-doi"));
+      doiInput.setAttribute("aria-invalid", String(!!row.doiError));
+      doiInput.setAttribute(
+        "aria-describedby",
+        `chapterize-doi-message-${row.id}`,
+      );
       doiInput.classList.toggle("chapterize-input-error", !!row.doiError);
       const doiMessage = row.doiMessageKey ? getString(row.doiMessageKey) : "";
       doiInput.title = doiMessage || getString("dialog-doi-lookup-title");
+      const message = doc.createElement("div");
+      message.id = `chapterize-doi-message-${row.id}`;
+      message.className = row.doiError
+        ? "chapterize-doi-message chapterize-doi-message-error"
+        : "chapterize-doi-message";
+      message.setAttribute("role", row.doiError ? "alert" : "status");
+      message.setAttribute("aria-live", row.doiError ? "assertive" : "polite");
+      message.textContent = doiMessage;
       doiInput.addEventListener("input", () => {
         row.manualDoi = doiInput.value;
         row.doiError = false;
         row.doiMessageKey = undefined;
+        doiInput.classList.remove("chapterize-input-error");
+        doiInput.setAttribute("aria-invalid", "false");
+        doiInput.title = getString("dialog-doi-lookup-title");
+        message.className = "chapterize-doi-message";
+        message.setAttribute("role", "status");
+        message.setAttribute("aria-live", "polite");
+        message.textContent = "";
       });
       doiInput.addEventListener("keydown", (event: KeyboardEvent) => {
         if (event.key === "Enter") {
@@ -531,37 +587,38 @@ export async function showSplitPlanDialog(
       doiLookup.title = getString("dialog-doi-lookup-title");
       doiLookup.addEventListener("click", () => void lookupDoi(row, doc));
       doiControls.append(doiInput, doiLookup);
-      doiCell.append(doiControls);
-      if (doiMessage) {
-        const message = doc.createElement("div");
-        message.className = row.doiError
-          ? "chapterize-doi-message chapterize-doi-message-error"
-          : "chapterize-doi-message";
-        message.textContent = doiMessage;
-        doiCell.append(message);
-      }
+      doiCell.append(doiControls, message);
       tr.append(doiCell);
 
       const metadataCell = doc.createElement("td");
       metadataCell.className = "chapterize-metadata-cell";
       const matchButton = doc.createElement("button");
       matchButton.type = "button";
-      matchButton.className = "chapterize-match";
-      matchButton.disabled = !!row.metadataLoading;
-      matchButton.textContent = row.metadataLoading
-        ? getString("dialog-metadata-searching")
+      const metadataState = row.metadataLoading
+        ? "loading"
         : row.metadataMatch
-          ? getString("dialog-metadata-confidence", {
-              args: {
-                confidence: Math.round(row.metadataMatch.confidence * 100),
-              },
-            })
+          ? "matched"
           : row.metadataMatch === null
-            ? getString("dialog-metadata-none")
-            : getString("dialog-metadata-find");
-      matchButton.title = getString("dialog-metadata-find-title");
-      if (row.metadataMatch === null) {
-        matchButton.title = getString("dialog-metadata-none-help");
+            ? "needs-doi"
+            : "idle";
+      const metadataPresentation = metadataStatusPresentation(metadataState);
+      matchButton.className = `chapterize-match chapterize-match-${metadataPresentation.tone}`;
+      matchButton.disabled = !!row.metadataLoading;
+      matchButton.textContent = getString(metadataPresentation.labelKey, {
+        args: {
+          confidence: Math.round((row.metadataMatch?.confidence ?? 0) * 100),
+        },
+      });
+      matchButton.title = getString(metadataPresentation.helpKey);
+      if (row.metadataMatch) {
+        matchButton.setAttribute(
+          "aria-expanded",
+          String(!!row.metadataExpanded),
+        );
+        matchButton.setAttribute(
+          "aria-controls",
+          `chapterize-metadata-details-${row.id}`,
+        );
       }
       matchButton.addEventListener("click", () => {
         if (row.metadataMatch) {
@@ -582,19 +639,10 @@ export async function showSplitPlanDialog(
         doc,
         initialPageCount > 0 ? String(initialPageCount) : "-",
       );
-      const status = makeCell(
-        doc,
-        getString(
-          input.isExistingRange(row.startPage, row.endPage)
-            ? "dialog-status-existing"
-            : "dialog-status-new",
-        ),
-      );
-      status.className = "chapterize-status";
-      status.title = getString(
-        input.isExistingRange(row.startPage, row.endPage)
-          ? "dialog-status-existing-help"
-          : "dialog-status-new-help",
+      const status = makeCell(doc, "");
+      updateSectionStatus(
+        status,
+        input.isExistingRange(row.startPage, row.endPage),
       );
       for (const field of ["startPage", "endPage"] as const) {
         const cell = doc.createElement("td");
@@ -617,21 +665,13 @@ export async function showSplitPlanDialog(
           printedPages.textContent = displayedPrintedRange(row);
           printedPages.title = printedPages.textContent;
           const exists = input.isExistingRange(row.startPage, row.endPage);
-          status.textContent = getString(
-            exists ? "dialog-status-existing" : "dialog-status-new",
-          );
-          status.title = getString(
-            exists ? "dialog-status-existing-help" : "dialog-status-new-help",
-          );
-          status.classList.toggle("chapterize-status-existing", exists);
+          updateSectionStatus(status, exists);
           refreshStatus(doc);
         });
         cell.append(page);
         tr.append(cell);
       }
 
-      const exists = input.isExistingRange(row.startPage, row.endPage);
-      status.classList.toggle("chapterize-status-existing", exists);
       tr.append(printedPages, pageCount, status);
       const actions = doc.createElement("td");
       const remove = doc.createElement("button");
@@ -654,6 +694,7 @@ export async function showSplitPlanDialog(
         const detailsCell = doc.createElement("td");
         detailsCell.colSpan = 11;
         const details = doc.createElement("div");
+        details.id = `chapterize-metadata-details-${row.id}`;
         details.className = "chapterize-metadata-details";
         const heading = doc.createElement("strong");
         heading.textContent = getString("dialog-metadata-review", {
@@ -694,7 +735,7 @@ export async function showSplitPlanDialog(
 
   dialog
     .addCell(0, 0, {
-      tag: "div",
+      tag: "main",
       namespace: "html",
       classList: ["chapterize-dialog"],
       children: [
@@ -714,73 +755,87 @@ export async function showSplitPlanDialog(
                 --chapterize-blue-hover: oklch(0.46 0.18 255);
                 --chapterize-blue-soft: oklch(0.95 0.035 255);
                 --chapterize-blue-ink: oklch(0.38 0.16 255);
+                --chapterize-success: oklch(0.43 0.12 155);
+                --chapterize-success-soft: oklch(0.96 0.025 155);
+                --chapterize-warning: oklch(0.47 0.11 75);
+                --chapterize-warning-soft: oklch(0.96 0.035 85);
                 --chapterize-danger: oklch(0.48 0.18 25);
                 --chapterize-danger-soft: oklch(0.96 0.035 25);
                 --chapterize-radius: 6px;
               }
-              html, body { box-sizing: border-box; width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--chapterize-bg); color: var(--chapterize-ink); }
+              html, body { box-sizing: border-box; width: 100%; height: 100%; margin: 0; overflow: hidden; overscroll-behavior: contain; background: var(--chapterize-bg); color: var(--chapterize-ink); -moz-osx-font-smoothing: grayscale; }
               *, *::before, *::after { box-sizing: inherit; }
               body > vbox, body > vbox > hbox:first-child, body > vbox > hbox:first-child > vbox { min-height: 0; overflow: hidden; }
               body > vbox > hbox:last-child { flex-shrink: 0; gap: 8px; padding: 10px 20px 12px; border-top: 1px solid var(--chapterize-border); background: var(--chapterize-surface); }
-              .chapterize-dialog { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; gap: 10px; min-width: 900px; width: 100%; height: 100%; min-height: 0; padding: 18px 20px 10px; overflow: hidden; color: var(--chapterize-ink); font: menu; }
-              .chapterize-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+              .chapterize-dialog { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; gap: 12px; width: 100%; height: 100%; min-height: 0; padding: 18px 20px 10px; overflow: hidden; color: var(--chapterize-ink); font: menu; line-height: 1.4; }
+              .chapterize-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 20px; }
               .chapterize-header h1 { margin: 0; color: var(--chapterize-blue-ink); font-size: 20px; font-weight: 650; letter-spacing: 0; }
               .chapterize-header-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
               .chapterize-source { color: var(--chapterize-muted); }
               .chapterize-language { display: inline-flex; align-items: center; gap: 6px; color: var(--chapterize-muted); }
-              .chapterize-language select { width: 112px; min-height: 32px; padding: 3px 28px 3px 8px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
-              .chapterize-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); }
-              .chapterize-toolbar button, .chapterize-delete, #split, #cancel { min-height: 32px; margin: 0; border: 1px solid var(--chapterize-border-strong); border-radius: 5px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out; }
-              .chapterize-toolbar button { padding: 4px 10px; }
+              .chapterize-language select { width: 112px; min-height: 34px; padding: 3px 28px 3px 8px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
+              .chapterize-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 10px; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); }
+              .chapterize-toolbar button, .chapterize-delete, #split, #cancel { min-height: 34px; margin: 0; border: 1px solid var(--chapterize-border-strong); border-radius: 5px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
+              .chapterize-toolbar button { padding: 4px 11px; }
               .chapterize-toolbar button:hover, .chapterize-delete:hover, #cancel:hover { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); }
               .chapterize-toolbar button:active, .chapterize-delete:active, #cancel:active { background: var(--chapterize-surface-subtle); }
               .chapterize-toolbar button:disabled { border-color: var(--chapterize-border); color: var(--chapterize-muted); opacity: .58; }
               .chapterize-toolbar button:focus-visible, .chapterize-delete:focus-visible, .chapterize-doi-lookup:focus-visible, #split:focus-visible, #cancel:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--chapterize-blue); outline-offset: 2px; }
               #chapterize-plan-recommended { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font-weight: 600; }
-              .chapterize-toolbar-separator { width: 1px; height: 24px; margin: 0 2px; background: var(--chapterize-border); }
-              .chapterize-summary { margin-left: auto; color: var(--chapterize-muted); font-variant-numeric: tabular-nums; }
-              .chapterize-guidance { padding: 8px 10px; border-left: 3px solid var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); line-height: 1.4; }
-              .chapterize-table-wrap { min-height: 0; overflow: auto; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); }
-              table { width: 100%; min-width: calc(var(--chapterize-title-width, 520px) + 1120px); border-collapse: collapse; table-layout: fixed; }
-              th { position: sticky; top: 0; z-index: 1; background: var(--chapterize-surface-subtle); color: var(--chapterize-blue-ink); text-align: left; font-weight: 650; }
+              .chapterize-button-active { border-color: var(--chapterize-blue) !important; background: var(--chapterize-blue-soft) !important; color: var(--chapterize-blue-ink) !important; font-weight: 600; }
+              .chapterize-toolbar-separator { width: 1px; height: 26px; margin-inline: 8px; background: var(--chapterize-border); }
+              #chapterize-plan-match-all, #chapterize-plan-add { margin-inline-start: 10px; }
+              .chapterize-summary { margin-inline-start: auto; color: var(--chapterize-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+              .chapterize-guidance { padding: 8px 11px; border-inline-start: 3px solid var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font-size: .94em; line-height: 1.45; }
+              .chapterize-table-wrap { min-height: 0; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); scrollbar-gutter: stable; }
+              table { width: 100%; min-width: calc(var(--chapterize-title-width, 520px) + 1050px); border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+              th { position: sticky; top: 0; z-index: 3; background: var(--chapterize-surface-subtle); color: var(--chapterize-blue-ink); text-align: start; font-weight: 650; }
               th, td { padding: 7px 8px; border-bottom: 1px solid var(--chapterize-border); }
-              tbody tr { background: var(--chapterize-surface); transition: background-color 160ms ease-out, opacity 160ms ease-out; }
+              tbody tr { background: var(--chapterize-surface); }
               tbody tr:hover { background: var(--chapterize-blue-soft); }
               tbody tr:last-child td { border-bottom: 0; }
               th:nth-child(1), td:nth-child(1) { width: 68px; text-align: center; }
               th:nth-child(2), td:nth-child(2) { width: 42px; color: var(--chapterize-muted); }
               th:nth-child(3), td:nth-child(3) { width: var(--chapterize-title-width, 520px); }
-              th:nth-child(4), td:nth-child(4) { width: 320px; }
-              th:nth-child(5), td:nth-child(5) { width: 110px; }
-              th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { width: 92px; }
-              th:nth-child(8), td:nth-child(8) { width: 118px; }
-              th:nth-child(9), td:nth-child(9) { width: 64px; }
-              th:nth-child(10), td:nth-child(10) { width: 90px; }
-              th:nth-child(11), td:nth-child(11) { width: 88px; }
+              th:nth-child(4), td:nth-child(4) { width: 290px; }
+              th:nth-child(5), td:nth-child(5) { width: 116px; }
+              th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { width: 88px; }
+              th:nth-child(8), td:nth-child(8) { width: 112px; }
+              th:nth-child(9), td:nth-child(9) { width: 58px; }
+              th:nth-child(10), td:nth-child(10) { width: 104px; }
+              th:nth-child(11), td:nth-child(11) { width: 82px; }
+              th:nth-child(1), tbody tr:not(.chapterize-metadata-details-row) > td:nth-child(1) { position: sticky; left: 0; z-index: 2; background: inherit; }
+              th:nth-child(2), tbody tr:not(.chapterize-metadata-details-row) > td:nth-child(2) { position: sticky; left: 68px; z-index: 2; background: inherit; }
+              th:nth-child(3), tbody tr:not(.chapterize-metadata-details-row) > td:nth-child(3) { position: sticky; left: 110px; z-index: 2; border-inline-end: 1px solid var(--chapterize-border-strong); background: inherit; box-shadow: 5px 0 8px -8px var(--chapterize-ink); }
+              th:nth-child(-n+3) { z-index: 4; background: var(--chapterize-surface-subtle); }
               td input[type="text"], td input[type="number"] { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
               td input[type="checkbox"] { accent-color: var(--chapterize-blue); }
               .chapterize-title-cell { min-width: 0; padding-block: 6px; }
               .chapterize-title-cell input { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
               .chapterize-printed-pages { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-              .chapterize-status { color: var(--chapterize-muted); }
-              .chapterize-status::before { display: inline-block; width: 6px; height: 6px; margin-inline-end: 6px; border-radius: 50%; background: var(--chapterize-border-strong); content: ""; vertical-align: 1px; }
-              .chapterize-status-existing { color: var(--chapterize-blue-ink); font-weight: 600; }
-              .chapterize-status-existing::before { background: var(--chapterize-blue); }
-              .chapterize-row-disabled { opacity: .52; }
+              .chapterize-status { color: var(--chapterize-muted); font-weight: 600; white-space: nowrap; }
+              .chapterize-status::before { display: inline-block; width: 7px; height: 7px; margin-inline-end: 6px; border: 2px solid currentColor; border-radius: 50%; content: ""; vertical-align: 0; }
+              .chapterize-status-update { color: var(--chapterize-blue-ink); }
+              .chapterize-status-new { color: var(--chapterize-success); }
+              .chapterize-row-disabled { color: var(--chapterize-muted); background: var(--chapterize-surface-subtle); }
+              .chapterize-row-disabled input { background: var(--chapterize-surface-subtle); }
               .chapterize-row-error, .chapterize-row-error:hover { background: var(--chapterize-danger-soft); }
               .chapterize-row-error input { border-color: var(--chapterize-danger); }
               .chapterize-errors { min-height: 0; padding: 8px 10px; border: 1px solid color-mix(in oklch, var(--chapterize-danger) 35%, white); border-radius: var(--chapterize-radius); background: var(--chapterize-danger-soft); color: var(--chapterize-danger); }
               .chapterize-errors[hidden] { display: none; }
               .chapterize-delete { width: 100%; padding: 3px 8px; color: var(--chapterize-muted); }
-              .chapterize-title-width { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 4px; color: var(--chapterize-muted); white-space: nowrap; }
+              .chapterize-title-width { display: inline-flex; min-height: 34px; align-items: center; gap: 6px; padding: 0 4px; color: var(--chapterize-muted); white-space: nowrap; }
               .chapterize-title-width input { width: 112px; accent-color: var(--chapterize-blue); }
               .chapterize-title-width output { width: 42px; color: var(--chapterize-ink); font-variant-numeric: tabular-nums; }
-              .chapterize-match { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font: inherit; }
+              .chapterize-match { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; font-weight: 600; }
+              .chapterize-match-progress { color: var(--chapterize-muted); }
+              .chapterize-match-warning { border-color: color-mix(in oklch, var(--chapterize-warning) 45%, white); background: var(--chapterize-warning-soft); color: var(--chapterize-warning); }
+              .chapterize-match-success { border-color: color-mix(in oklch, var(--chapterize-success) 45%, white); background: var(--chapterize-success-soft); color: var(--chapterize-success); }
               .chapterize-doi-controls { display: grid; grid-template-columns: minmax(0, 1fr) 60px; align-items: center; gap: 10px; }
               .chapterize-doi-controls input { min-width: 0; padding-inline: 8px; }
               .chapterize-doi-lookup { width: 60px; min-height: 30px; padding: 3px 8px; border: 1px solid var(--chapterize-blue); border-radius: 4px; background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font: inherit; white-space: nowrap; }
               .chapterize-input-error { border-color: var(--chapterize-danger) !important; background: var(--chapterize-danger-soft) !important; }
-              .chapterize-doi-message { margin-top: 4px; color: var(--chapterize-blue-ink); font-size: .9em; line-height: 1.25; }
+              .chapterize-doi-message { min-height: 1.15em; margin-top: 4px; color: var(--chapterize-blue-ink); font-size: .88em; line-height: 1.2; }
               .chapterize-doi-message-error { color: var(--chapterize-danger); }
               .chapterize-metadata-details-row:hover { background: var(--chapterize-surface); }
               .chapterize-metadata-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 6px 14px; padding: 10px 12px; border-left: 3px solid var(--chapterize-blue); background: var(--chapterize-surface-subtle); }
@@ -792,8 +847,10 @@ export async function showSplitPlanDialog(
               #split { border-color: var(--chapterize-blue); background: var(--chapterize-blue); color: white; font-weight: 650; }
               #split:hover { border-color: var(--chapterize-blue-hover); background: var(--chapterize-blue-hover); }
               #split:active { background: var(--chapterize-blue-ink); }
-              @media (max-width: 820px) { .chapterize-summary { flex-basis: 100%; margin-left: 0; } }
-              @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+              @media (max-width: 1100px) { .chapterize-summary { flex-basis: 100%; margin-inline-start: 0; padding-top: 4px; } }
+              @media (max-width: 760px) { .chapterize-dialog { padding-inline: 12px; } .chapterize-header-tools { justify-content: flex-start; } .chapterize-guidance { max-height: 4.5em; overflow: auto; } }
+              @media (prefers-reduced-motion: no-preference) { .chapterize-toolbar button, .chapterize-delete, #split, #cancel, tbody tr { transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out, opacity 160ms ease-out; } }
+              @media (forced-colors: active) { .chapterize-status::before, .chapterize-guidance, .chapterize-metadata-details { border-color: CanvasText; } }
             `,
           },
         },
@@ -944,7 +1001,10 @@ export async function showSplitPlanDialog(
             {
               tag: "button",
               id: ids.cleanTitles,
-              attributes: { type: "button" },
+              attributes: {
+                type: "button",
+                "aria-pressed": String(cleanTitles),
+              },
               properties: {
                 textContent: getString("dialog-clean-chapter-numbers"),
               },
@@ -955,7 +1015,7 @@ export async function showSplitPlanDialog(
                     cleanTitles = true;
                     setPref("cleanChapterNumbers", true);
                     rows.forEach((row) => {
-                      row.title = cleanChapterTitle(row.title);
+                      changeRowTitle(row, cleanChapterTitle(row.title));
                     });
                     render(dialog.window.document);
                   },
@@ -975,7 +1035,9 @@ export async function showSplitPlanDialog(
                   listener: () => {
                     cleanTitles = false;
                     setPref("cleanChapterNumbers", false);
-                    rows.forEach((row) => (row.title = row.originalTitle));
+                    rows.forEach((row) =>
+                      changeRowTitle(row, row.originalTitle),
+                    );
                     render(dialog.window.document);
                   },
                 },
@@ -1031,6 +1093,9 @@ export async function showSplitPlanDialog(
                 {
                   tag: "output",
                   id: ids.titleWidthValue,
+                  attributes: {
+                    for: ids.titleWidth,
+                  },
                   properties: { textContent: `${titleColumnWidth}px` },
                 },
               ],
@@ -1106,6 +1171,7 @@ export async function showSplitPlanDialog(
               tag: "span",
               id: ids.summary,
               classList: ["chapterize-summary"],
+              attributes: { role: "status", "aria-live": "polite" },
             },
           ],
         },
@@ -1122,6 +1188,11 @@ export async function showSplitPlanDialog(
           children: [
             {
               tag: "table",
+              attributes: {
+                "aria-label": getString("dialog-table-label"),
+                "data-i18n-aria-label": "dialog-table-label",
+                "aria-describedby": `${ids.guidance} ${ids.summary}`,
+              },
               children: [
                 {
                   tag: "thead",
@@ -1142,7 +1213,10 @@ export async function showSplitPlanDialog(
                         "dialog-col-actions",
                       ].map((key) => ({
                         tag: "th",
-                        attributes: { "data-i18n-key": key },
+                        attributes: {
+                          scope: "col",
+                          "data-i18n-key": key,
+                        },
                         properties: { textContent: getString(key as any) },
                       })),
                     },
