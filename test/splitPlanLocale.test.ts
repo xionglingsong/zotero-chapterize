@@ -21,6 +21,16 @@ describe("split preview language", function () {
     );
   });
 
+  it("reports the remaining author confirmations in the summary", function () {
+    assert.include(
+      splitPlanText("zh-CN", "dialog-summary", {
+        sections: 3,
+        authorPending: 2,
+      }),
+      "待确认作者 2 个",
+    );
+  });
+
   it("uses action-oriented status and recovery copy in both languages", function () {
     assert.equal(splitPlanText("zh-CN", "dialog-status-new"), "将新建");
     assert.equal(splitPlanText("zh-CN", "dialog-status-existing"), "将更新");
@@ -35,6 +45,11 @@ describe("split preview language", function () {
     assert.include(
       splitPlanText("en-US", "dialog-metadata-review-help"),
       "fields",
+    );
+    assert.include(splitPlanText("zh-CN", "dialog-author-review-help"), "确认");
+    assert.equal(
+      splitPlanText("en-US", "dialog-author-source-toc", { page: "vii" }),
+      "Source: contents page vii",
     );
   });
 

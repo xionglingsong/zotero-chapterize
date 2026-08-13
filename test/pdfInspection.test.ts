@@ -25,6 +25,7 @@ describe("PDF inspection", function () {
       totalPages: 4,
       fingerprint: "PDF-HASH",
       pageLabels: ["i", "1", "2", "3"],
+      authorCandidates: [null],
       chapters: [
         {
           title: "Chapter 1",
@@ -48,5 +49,47 @@ describe("PDF inspection", function () {
 
     assert.equal(result.fingerprint, "pages-1");
     assert.deepEqual(result.pageLabels, []);
+    assert.deepEqual(result.authorCandidates, []);
+  });
+
+  it("extracts unconfirmed author candidates from bookmarked contents pages", async function () {
+    const contentsRef = { num: 1 };
+    const chapterRef = { num: 2 };
+    const result = await inspectLoadedPdf({
+      numPages: 4,
+      fingerprints: ["PDF-TOC"],
+      getOutline: async () => [
+        { title: "Contents", dest: [contentsRef] },
+        {
+          title: "33 Eye-tracking studies in conference interpreting",
+          dest: [chapterRef],
+        },
+      ],
+      getPageIndex: async (ref: unknown) => (ref === contentsRef ? 0 : 2),
+      getPageLabels: async () => ["vii", "viii", "457", "458"],
+      getPage: async (page: number) => ({
+        getTextContent: async () => ({
+          items:
+            page === 1
+              ? [
+                  {
+                    str: "33 Eye-tracking studies in conference interpreting 457",
+                    transform: [1, 0, 0, 1, 20, 700],
+                    hasEOL: true,
+                  },
+                  {
+                    str: "Agnieszka Chmiel",
+                    transform: [1, 0, 0, 1, 20, 680],
+                    hasEOL: true,
+                  },
+                ]
+              : [],
+        }),
+        cleanup() {},
+      }),
+    });
+
+    assert.equal(result.authorCandidates[1]?.rawText, "Agnieszka Chmiel");
+    assert.equal(result.authorCandidates[1]?.pageIndex, 0);
   });
 });

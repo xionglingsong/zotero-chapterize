@@ -10,10 +10,15 @@ import {
   type PdfIdentity,
 } from "./pageLabels";
 import { loadPdfDoc, releasePdfDoc } from "./pdfjs";
+import {
+  readTocAuthorCandidatesFromDocument,
+  type ChapterAuthorCandidate,
+} from "./tocAuthors";
 
 export interface PdfInspection extends PdfIdentity {
   chapters: Chapter[];
   pageLabels: string[];
+  authorCandidates: Array<ChapterAuthorCandidate | null>;
 }
 
 export async function inspectLoadedPdf(
@@ -25,10 +30,15 @@ export async function inspectLoadedPdf(
     readPdfOutlineFromDocument(doc, opts),
     readPageLabelsFromDocument(doc),
   ]);
+  const authorCandidates = await readTocAuthorCandidatesFromDocument(
+    doc,
+    chapters,
+  );
   return {
     ...pdfIdentityFromDocument(doc, fallbackFingerprint),
     chapters,
     pageLabels,
+    authorCandidates,
   };
 }
 

@@ -20,6 +20,8 @@ Chapterize 是一个 Zotero 插件，可按 PDF 书签或手动页码范围预�
 - 自动按 ISBN、书名和章节标题匹配 Crossref，并填入 DOI。
 - 标题匹配失败时可手动粘贴 DOI，获取完整章节元数据。
 - 提供置信度、字段级预览和逐项接受；父书编者不会被误作章作者。
+- Crossref 无匹配时可从带书签的目录页提取章作者候选，显示来源页并要求人工确认。
+- 可逐个编辑、添加或移除章作者；手工编辑的作者优先于后续自动匹配。
 - 拆分预览支持中文和英文即时切换，默认中文。
 - 继承出版者、日期、ISBN、语言等可靠的父书元数据。
 - 使用来源指纹和物理页范围去重，避免重复拆分。
@@ -38,7 +40,7 @@ Chapterize 是一个 Zotero 插件，可按 PDF 书签或手动页码范围预�
 - **拆分范围**始终使用 PDF 中从 1 开始显示的物理页位置。
 - **Pages 元数据**优先使用 PDF `/PageLabels` 中的印刷页码，例如 `iii-xiv` 或 `57-76`；没有页码标签时回退到物理页码。
 - 父书 DOI、URL 和 Extra 不会复制给章节，以免把整本书的标识符错误地当作章节标识符。
-- 父书 creators 不会复制为章作者。章作者仅来自用户确认的 Crossref/DOI 元数据；没有可靠来源时保持为空。
+- 父书 creators 不会复制为章作者。章作者可以来自 Crossref/DOI、目录页候选或手工录入；目录候选和手工修改必须明确确认，未确认内容不会写入。
 
 ### 开发
 
@@ -77,6 +79,8 @@ It supports Zotero 7, 8, and 9 and is tested primarily with Zotero 9.
 - Match Crossref automatically by ISBN, book title, and chapter title to fill DOI values.
 - Accept a manually pasted DOI when title matching fails and fetch complete chapter metadata.
 - Show confidence and field-level acceptance; book editors are never treated as chapter authors.
+- Extract chapter-author candidates from bookmarked contents pages when Crossref has no match, show the source page, and require explicit review.
+- Edit, add, or remove chapter authors individually; manually edited authors take precedence over later automatic matching.
 - Switch the split preview between Chinese and English, with Chinese as the default.
 - Inherit reliable book metadata such as publisher, date, ISBN, and language.
 - Deduplicate by source fingerprint and physical page range.
@@ -95,7 +99,7 @@ After the GitHub Release build is installed once, Zotero checks the public `upda
 - **Splitting** always uses the PDF's physical page positions, displayed from 1 in the editor.
 - **Pages metadata** uses printed labels from the PDF's `/PageLabels`, such as `iii-xiv` or `57-76`, and falls back to physical numbering when labels are unavailable.
 - The parent book's DOI, URL, and Extra are not copied because they should not be presented as chapter identifiers.
-- Parent creators are not copied as chapter authors. Authors come only from user-accepted Crossref/DOI metadata and remain empty when no reliable source is available.
+- Parent creators are not copied as chapter authors. Authors may come from Crossref/DOI, contents-page candidates, or manual entry; contents candidates and manual edits require explicit confirmation, and unconfirmed values are never written.
 
 ### Development
 

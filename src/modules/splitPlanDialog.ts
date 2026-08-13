@@ -6,8 +6,10 @@ import {
   searchSectionByTitle,
   type CrossRefMatch,
   type CrossRefSectionMeta,
+  type ZoteroCreator,
 } from "./crossref";
 import type { Chapter } from "./pdf/outline";
+import type { ChapterAuthorCandidate } from "./pdf/tocAuthors";
 import {
   normalizeSplitPlan,
   summarizeSplitPlan,
@@ -27,9 +29,13 @@ import {
   type SplitPlanLanguage,
 } from "./splitPlanLocale";
 import {
+  authorStatusPresentation,
+  confirmedCreatorMetadata,
   metadataStatusPresentation,
   sectionStatusPresentation,
   shouldDiscardTitleMatch,
+  shouldReplaceCreatorDraft,
+  type AuthorSource,
 } from "./splitPlanPresentation";
 
 interface EditableRow extends Chapter {
@@ -46,6 +52,11 @@ interface EditableRow extends Chapter {
   doiLoading?: boolean;
   doiMessageKey?: string;
   doiError?: boolean;
+  creatorDraft: ZoteroCreator[];
+  creatorSource?: AuthorSource;
+  creatorSourcePage?: number;
+  creatorRawText?: string;
+  creatorsConfirmed: boolean;
 }
 
 type MetadataField = keyof CrossRefSectionMeta;
@@ -61,6 +72,7 @@ export interface SplitPlanDialogInput {
   isExistingRange(startPage: number, endPage: number): boolean;
   bookTitle?: string;
   isbn?: string;
+  authorCandidates?: Array<ChapterAuthorCandidate | null>;
 }
 
 const ids = {
@@ -105,17 +117,27 @@ export async function showSplitPlanDialog(
       recommended,
       input.totalPages,
     );
-    return input.detectedChapters.map((chapter, index) => ({
-      ...chapter,
-      title: cleanTitles ? cleanChapterTitle(chapter.title) : chapter.title,
-      endPage: recommendedEnds[index] ?? chapter.endPage,
-      id: nextID++,
-      enabled: recommended[index] ?? true,
-      detectedEndPage: chapter.endPage,
-      originalTitle: chapter.title,
-      acceptedFields: new Set<MetadataField>(),
-      manualDoi: "",
-    }));
+    return input.detectedChapters.map((chapter, index) => {
+      const authorCandidate = input.authorCandidates?.[index];
+      return {
+        ...chapter,
+        title: cleanTitles ? cleanChapterTitle(chapter.title) : chapter.title,
+        endPage: recommendedEnds[index] ?? chapter.endPage,
+        id: nextID++,
+        enabled: recommended[index] ?? true,
+        detectedEndPage: chapter.endPage,
+        originalTitle: chapter.title,
+        acceptedFields: new Set<MetadataField>(),
+        manualDoi: "",
+        creatorDraft: authorCandidate?.creators.map((creator) => ({
+          ...creator,
+        })) ?? [{ creatorType: "author" as const }],
+        creatorSource: authorCandidate ? ("toc" as const) : undefined,
+        creatorSourcePage: authorCandidate?.pageIndex,
+        creatorRawText: authorCandidate?.rawText,
+        creatorsConfirmed: false,
+      };
+    });
   };
   let rows: EditableRow[] = fromDetected();
   let result: ChapterPlan[] | null = null;
@@ -187,16 +209,42 @@ export async function showSplitPlanDialog(
     row: EditableRow,
   ): Partial<CrossRefSectionMeta> | undefined {
     const metadata = row.metadataMatch?.metadata;
-    if (!metadata || row.acceptedFields.size === 0) return undefined;
     const accepted: Partial<CrossRefSectionMeta> = {};
-    for (const field of row.acceptedFields) {
-      (accepted as any)[field] = metadata[field];
+    if (metadata) {
+      for (const field of row.acceptedFields) {
+        (accepted as any)[field] = metadata[field];
+      }
     }
-    return accepted;
+    const creators = confirmedCreatorMetadata(
+      row.creatorDraft,
+      row.creatorsConfirmed,
+    );
+    if (creators) accepted.creators = creators;
+    return Object.keys(accepted).length > 0 ? accepted : undefined;
+  }
+
+  function replaceCreatorDraft(
+    row: EditableRow,
+    creators: ZoteroCreator[],
+    source: AuthorSource,
+    confirmed: boolean,
+  ): void {
+    row.creatorDraft = creators.length
+      ? creators.map((creator) => ({ ...creator }))
+      : [{ creatorType: "author" }];
+    row.creatorSource = source;
+    row.creatorSourcePage = undefined;
+    row.creatorRawText = undefined;
+    row.creatorsConfirmed = confirmed;
+    row.acceptedFields.delete("creators");
   }
 
   function changeRowTitle(row: EditableRow, nextTitle: string): void {
     if (shouldDiscardTitleMatch(row.metadataSource, row.title, nextTitle)) {
+      if (row.creatorSource === "crossref") {
+        replaceCreatorDraft(row, [], "manual", false);
+        row.creatorSource = undefined;
+      }
       row.metadataMatch = undefined;
       row.metadataSource = undefined;
       row.metadataExpanded = false;
@@ -222,11 +270,26 @@ export async function showSplitPlanDialog(
       match
         ? metadataFields.filter(
             (field) =>
+              field !== "creators" &&
               (acceptAll || defaultAcceptedFields.has(field)) &&
               metadataValue(match.metadata, field) !== "",
           )
         : [],
     );
+    if (
+      match?.metadata.creators.length &&
+      shouldReplaceCreatorDraft(
+        row.creatorSource,
+        !!confirmedCreatorMetadata(row.creatorDraft, true),
+      )
+    ) {
+      replaceCreatorDraft(
+        row,
+        match.metadata.creators,
+        source === "doi" ? "doi" : "crossref",
+        true,
+      );
+    }
     if (match?.metadata.doi) row.manualDoi = match.metadata.doi;
   }
 
@@ -354,6 +417,11 @@ export async function showSplitPlanDialog(
     const existing = selected.filter((row) =>
       input.isExistingRange(row.startPage, row.endPage),
     ).length;
+    const authorPending = selected.filter(
+      (row) =>
+        !!confirmedCreatorMetadata(row.creatorDraft, true) &&
+        !row.creatorsConfirmed,
+    ).length;
     const summaryNode = doc.getElementById(ids.summary);
     const errorNode = doc.getElementById(ids.errors) as HTMLElement | null;
     if (summaryNode) {
@@ -364,6 +432,7 @@ export async function showSplitPlanDialog(
           existing,
           covered: summary.coveredPages,
           omitted: summary.omittedPages,
+          authorPending,
         },
       });
     }
@@ -406,6 +475,161 @@ export async function showSplitPlanDialog(
       `${getString(presentation.labelKey)}. ${getString(presentation.helpKey)}`,
     );
     status.className = `chapterize-status chapterize-status-${presentation.tone}`;
+  }
+
+  function authorSourceText(row: EditableRow): string {
+    switch (row.creatorSource) {
+      case "toc":
+        return getString("dialog-author-source-toc", {
+          args: {
+            page:
+              row.creatorSourcePage === undefined
+                ? "-"
+                : (input.pageLabels[row.creatorSourcePage] ??
+                  row.creatorSourcePage + 1),
+          },
+        });
+      case "crossref":
+        return getString("dialog-author-source-crossref");
+      case "doi":
+        return getString("dialog-author-source-doi");
+      case "manual":
+        return getString("dialog-author-source-manual");
+      default:
+        return getString("dialog-author-source-empty");
+    }
+  }
+
+  function markCreatorsEdited(row: EditableRow): void {
+    row.creatorSource = "manual";
+    row.creatorSourcePage = undefined;
+    row.creatorRawText = undefined;
+    row.creatorsConfirmed = false;
+    row.acceptedFields.delete("creators");
+  }
+
+  function appendAuthorEditor(
+    doc: Document,
+    row: EditableRow,
+    container: HTMLElement,
+  ): void {
+    const editor = doc.createElement("section");
+    editor.className = "chapterize-author-editor";
+    const header = doc.createElement("div");
+    header.className = "chapterize-author-header";
+    const heading = doc.createElement("strong");
+    heading.textContent = getString("dialog-author-heading");
+    const source = doc.createElement("span");
+    source.className = `chapterize-author-source chapterize-author-source-${row.creatorSource ?? "empty"}`;
+    source.textContent = authorSourceText(row);
+    header.append(heading, source);
+    editor.append(header);
+    if (row.creatorRawText) {
+      const raw = doc.createElement("p");
+      raw.className = "chapterize-author-raw";
+      raw.textContent = getString("dialog-author-toc-raw", {
+        args: { text: row.creatorRawText },
+      });
+      editor.append(raw);
+    }
+
+    const list = doc.createElement("div");
+    list.className = "chapterize-author-list";
+    row.creatorDraft.forEach((creator, creatorIndex) => {
+      const creatorRow = doc.createElement("div");
+      creatorRow.className = "chapterize-author-row";
+      const firstLabel = doc.createElement("label");
+      const firstName = doc.createElement("span");
+      firstName.textContent = getString("dialog-author-first-name");
+      const firstInput = doc.createElement("input");
+      firstInput.type = "text";
+      firstInput.name = `chapterize-author-${row.id}-${creatorIndex}-first`;
+      firstInput.autocomplete = "given-name";
+      firstInput.value = creator.firstName ?? "";
+      firstInput.addEventListener("input", () => {
+        creator.firstName = firstInput.value;
+        markCreatorsEdited(row);
+        source.className =
+          "chapterize-author-source chapterize-author-source-manual";
+        source.textContent = authorSourceText(row);
+        confirm.disabled = !confirmedCreatorMetadata(row.creatorDraft, true);
+      });
+      firstLabel.append(firstName, firstInput);
+
+      const lastLabel = doc.createElement("label");
+      const lastName = doc.createElement("span");
+      lastName.textContent = getString("dialog-author-last-name");
+      const lastInput = doc.createElement("input");
+      lastInput.type = "text";
+      lastInput.name = `chapterize-author-${row.id}-${creatorIndex}-last`;
+      lastInput.autocomplete = "family-name";
+      lastInput.value = creator.lastName ?? "";
+      lastInput.addEventListener("input", () => {
+        creator.lastName = lastInput.value;
+        markCreatorsEdited(row);
+        source.className =
+          "chapterize-author-source chapterize-author-source-manual";
+        source.textContent = authorSourceText(row);
+        confirm.disabled = !confirmedCreatorMetadata(row.creatorDraft, true);
+      });
+      lastLabel.append(lastName, lastInput);
+
+      const remove = doc.createElement("button");
+      remove.type = "button";
+      remove.className = "chapterize-author-remove";
+      remove.textContent = "−";
+      remove.title = getString("dialog-author-remove");
+      remove.setAttribute("aria-label", getString("dialog-author-remove"));
+      remove.addEventListener("click", () => {
+        if (row.creatorDraft.length === 1) {
+          row.creatorDraft = [{ creatorType: "author" }];
+        } else {
+          row.creatorDraft.splice(creatorIndex, 1);
+        }
+        markCreatorsEdited(row);
+        render(doc);
+      });
+      creatorRow.append(firstLabel, lastLabel, remove);
+      list.append(creatorRow);
+    });
+    editor.append(list);
+
+    const actions = doc.createElement("div");
+    actions.className = "chapterize-author-actions";
+    const add = doc.createElement("button");
+    add.type = "button";
+    add.textContent = getString("dialog-author-add-another");
+    add.addEventListener("click", () => {
+      row.creatorDraft.push({ creatorType: "author" });
+      markCreatorsEdited(row);
+      render(doc);
+    });
+    const confirm = doc.createElement("button");
+    confirm.type = "button";
+    confirm.className = "chapterize-author-confirm";
+    confirm.textContent = row.creatorsConfirmed
+      ? getString("dialog-author-confirmed")
+      : getString("dialog-author-confirm");
+    confirm.disabled =
+      !confirmedCreatorMetadata(row.creatorDraft, true) ||
+      row.creatorsConfirmed;
+    confirm.addEventListener("click", () => {
+      const creators = confirmedCreatorMetadata(row.creatorDraft, true);
+      if (!creators) return;
+      row.creatorDraft = creators;
+      row.creatorsConfirmed = true;
+      render(doc);
+    });
+    const clear = doc.createElement("button");
+    clear.type = "button";
+    clear.textContent = getString("dialog-author-clear");
+    clear.addEventListener("click", () => {
+      replaceCreatorDraft(row, [], "manual", false);
+      render(doc);
+    });
+    actions.append(add, clear, confirm);
+    editor.append(actions);
+    container.append(editor);
   }
 
   function displayedPrintedRange(row: EditableRow): string {
@@ -592,6 +816,8 @@ export async function showSplitPlanDialog(
 
       const metadataCell = doc.createElement("td");
       metadataCell.className = "chapterize-metadata-cell";
+      const metadataControls = doc.createElement("div");
+      metadataControls.className = "chapterize-metadata-controls";
       const matchButton = doc.createElement("button");
       matchButton.type = "button";
       const metadataState = row.metadataLoading
@@ -628,7 +854,31 @@ export async function showSplitPlanDialog(
           void matchRow(row, doc);
         }
       });
-      metadataCell.append(matchButton);
+      const hasCreators = !!confirmedCreatorMetadata(row.creatorDraft, true);
+      const authorPresentation = authorStatusPresentation(
+        row.creatorSource,
+        row.creatorsConfirmed,
+        hasCreators,
+      );
+      const authorButton = doc.createElement("button");
+      authorButton.type = "button";
+      authorButton.className = `chapterize-author-button chapterize-match-${authorPresentation.tone}`;
+      authorButton.textContent = getString(authorPresentation.labelKey);
+      authorButton.title = `${getString(authorPresentation.helpKey)} ${authorSourceText(row)}`;
+      authorButton.setAttribute(
+        "aria-expanded",
+        String(!!row.metadataExpanded),
+      );
+      authorButton.setAttribute(
+        "aria-controls",
+        `chapterize-metadata-details-${row.id}`,
+      );
+      authorButton.addEventListener("click", () => {
+        row.metadataExpanded = !row.metadataExpanded;
+        render(doc);
+      });
+      metadataControls.append(matchButton, authorButton);
+      metadataCell.append(metadataControls);
       tr.append(metadataCell);
 
       const printedPages = makeCell(doc, displayedPrintedRange(row));
@@ -688,7 +938,7 @@ export async function showSplitPlanDialog(
       tr.classList.toggle("chapterize-row-disabled", !row.enabled);
       body.append(tr);
 
-      if (row.metadataExpanded && row.metadataMatch) {
+      if (row.metadataExpanded) {
         const detailsRow = doc.createElement("tr");
         detailsRow.className = "chapterize-metadata-details-row";
         const detailsCell = doc.createElement("td");
@@ -696,34 +946,40 @@ export async function showSplitPlanDialog(
         const details = doc.createElement("div");
         details.id = `chapterize-metadata-details-${row.id}`;
         details.className = "chapterize-metadata-details";
-        const heading = doc.createElement("strong");
-        heading.textContent = getString("dialog-metadata-review", {
-          args: {
-            confidence: Math.round(row.metadataMatch.confidence * 100),
-          },
-        });
-        details.append(heading);
-        for (const field of metadataFields) {
-          const value = metadataValue(row.metadataMatch.metadata, field);
-          if (!value) continue;
-          const label = doc.createElement("label");
-          label.className = "chapterize-metadata-field";
-          const accept = doc.createElement("input");
-          accept.type = "checkbox";
-          accept.checked = row.acceptedFields.has(field);
-          accept.addEventListener("change", () => {
-            if (accept.checked) row.acceptedFields.add(field);
-            else row.acceptedFields.delete(field);
+        appendAuthorEditor(doc, row, details);
+        if (row.metadataMatch) {
+          const heading = doc.createElement("strong");
+          heading.textContent = getString("dialog-metadata-review", {
+            args: {
+              confidence: Math.round(row.metadataMatch.confidence * 100),
+            },
           });
-          const name = doc.createElement("span");
-          name.className = "chapterize-metadata-name";
-          name.textContent = getString(`dialog-metadata-field-${field}` as any);
-          const fieldValue = doc.createElement("span");
-          fieldValue.className = "chapterize-metadata-value";
-          fieldValue.textContent = value;
-          fieldValue.title = value;
-          label.append(accept, name, fieldValue);
-          details.append(label);
+          details.append(heading);
+          for (const field of metadataFields) {
+            if (field === "creators") continue;
+            const value = metadataValue(row.metadataMatch.metadata, field);
+            if (!value) continue;
+            const label = doc.createElement("label");
+            label.className = "chapterize-metadata-field";
+            const accept = doc.createElement("input");
+            accept.type = "checkbox";
+            accept.checked = row.acceptedFields.has(field);
+            accept.addEventListener("change", () => {
+              if (accept.checked) row.acceptedFields.add(field);
+              else row.acceptedFields.delete(field);
+            });
+            const name = doc.createElement("span");
+            name.className = "chapterize-metadata-name";
+            name.textContent = getString(
+              `dialog-metadata-field-${field}` as any,
+            );
+            const fieldValue = doc.createElement("span");
+            fieldValue.className = "chapterize-metadata-value";
+            fieldValue.textContent = value;
+            fieldValue.title = value;
+            label.append(accept, name, fieldValue);
+            details.append(label);
+          }
         }
         detailsCell.append(details);
         detailsRow.append(detailsCell);
@@ -780,7 +1036,7 @@ export async function showSplitPlanDialog(
               .chapterize-toolbar button:hover, .chapterize-delete:hover, #cancel:hover { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); }
               .chapterize-toolbar button:active, .chapterize-delete:active, #cancel:active { background: var(--chapterize-surface-subtle); }
               .chapterize-toolbar button:disabled { border-color: var(--chapterize-border); color: var(--chapterize-muted); opacity: .58; }
-              .chapterize-toolbar button:focus-visible, .chapterize-delete:focus-visible, .chapterize-doi-lookup:focus-visible, #split:focus-visible, #cancel:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--chapterize-blue); outline-offset: 2px; }
+              .chapterize-toolbar button:focus-visible, .chapterize-delete:focus-visible, .chapterize-doi-lookup:focus-visible, .chapterize-match:focus-visible, .chapterize-author-button:focus-visible, .chapterize-author-editor button:focus-visible, #split:focus-visible, #cancel:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--chapterize-blue); outline-offset: 2px; }
               #chapterize-plan-recommended { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font-weight: 600; }
               .chapterize-button-active { border-color: var(--chapterize-blue) !important; background: var(--chapterize-blue-soft) !important; color: var(--chapterize-blue-ink) !important; font-weight: 600; }
               .chapterize-toolbar-separator { width: 1px; height: 26px; margin-inline: 8px; background: var(--chapterize-border); }
@@ -828,6 +1084,8 @@ export async function showSplitPlanDialog(
               .chapterize-title-width input { width: 112px; accent-color: var(--chapterize-blue); }
               .chapterize-title-width output { width: 42px; color: var(--chapterize-ink); font-variant-numeric: tabular-nums; }
               .chapterize-match { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; font-weight: 600; }
+              .chapterize-metadata-controls { display: grid; gap: 5px; }
+              .chapterize-author-button { width: 100%; min-height: 28px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; font-size: .9em; font-weight: 600; }
               .chapterize-match-progress { color: var(--chapterize-muted); }
               .chapterize-match-warning { border-color: color-mix(in oklch, var(--chapterize-warning) 45%, white); background: var(--chapterize-warning-soft); color: var(--chapterize-warning); }
               .chapterize-match-success { border-color: color-mix(in oklch, var(--chapterize-success) 45%, white); background: var(--chapterize-success-soft); color: var(--chapterize-success); }
@@ -840,6 +1098,21 @@ export async function showSplitPlanDialog(
               .chapterize-metadata-details-row:hover { background: var(--chapterize-surface); }
               .chapterize-metadata-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 6px 14px; padding: 10px 12px; border-left: 3px solid var(--chapterize-blue); background: var(--chapterize-surface-subtle); }
               .chapterize-metadata-details > strong { grid-column: 1 / -1; color: var(--chapterize-blue-ink); }
+              .chapterize-author-editor { grid-column: 1 / -1; display: grid; gap: 8px; margin-bottom: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--chapterize-border); }
+              .chapterize-author-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+              .chapterize-author-source { padding: 2px 7px; border: 1px solid var(--chapterize-border-strong); border-radius: 999px; background: var(--chapterize-surface); color: var(--chapterize-muted); font-size: .88em; }
+              .chapterize-author-source-toc { border-color: color-mix(in oklch, var(--chapterize-warning) 45%, white); background: var(--chapterize-warning-soft); color: var(--chapterize-warning); }
+              .chapterize-author-source-crossref, .chapterize-author-source-doi { border-color: color-mix(in oklch, var(--chapterize-success) 45%, white); background: var(--chapterize-success-soft); color: var(--chapterize-success); }
+              .chapterize-author-raw { margin: 0; color: var(--chapterize-muted); font-size: .9em; }
+              .chapterize-author-list { display: grid; gap: 7px; }
+              .chapterize-author-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) 34px; align-items: end; gap: 10px; }
+              .chapterize-author-row label { display: grid; gap: 3px; color: var(--chapterize-muted); font-size: .88em; }
+              .chapterize-author-row input { width: 100%; min-height: 32px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; font-size: 1.1em; }
+              .chapterize-author-remove { width: 34px; min-height: 32px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-muted); font: inherit; font-size: 18px; }
+              .chapterize-author-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+              .chapterize-author-actions button { min-height: 32px; padding: 4px 10px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
+              .chapterize-author-actions .chapterize-author-confirm { border-color: var(--chapterize-blue); background: var(--chapterize-blue); color: white; font-weight: 600; }
+              .chapterize-author-actions .chapterize-author-confirm:disabled { border-color: var(--chapterize-border); background: var(--chapterize-surface-subtle); color: var(--chapterize-muted); }
               .chapterize-metadata-field { display: grid; grid-template-columns: auto 76px minmax(0, 1fr); align-items: start; gap: 6px; min-width: 0; }
               .chapterize-metadata-name { color: var(--chapterize-muted); }
               .chapterize-metadata-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -848,7 +1121,7 @@ export async function showSplitPlanDialog(
               #split:hover { border-color: var(--chapterize-blue-hover); background: var(--chapterize-blue-hover); }
               #split:active { background: var(--chapterize-blue-ink); }
               @media (max-width: 1100px) { .chapterize-summary { flex-basis: 100%; margin-inline-start: 0; padding-top: 4px; } }
-              @media (max-width: 760px) { .chapterize-dialog { padding-inline: 12px; } .chapterize-header-tools { justify-content: flex-start; } .chapterize-guidance { max-height: 4.5em; overflow: auto; } }
+              @media (max-width: 760px) { .chapterize-dialog { padding-inline: 12px; } .chapterize-header-tools { justify-content: flex-start; } .chapterize-guidance { max-height: 4.5em; overflow: auto; } .chapterize-author-row { grid-template-columns: 1fr 1fr 34px; } }
               @media (prefers-reduced-motion: no-preference) { .chapterize-toolbar button, .chapterize-delete, #split, #cancel, tbody tr { transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out, opacity 160ms ease-out; } }
               @media (forced-colors: active) { .chapterize-status::before, .chapterize-guidance, .chapterize-metadata-details { border-color: CanvasText; } }
             `,
@@ -1143,6 +1416,8 @@ export async function showSplitPlanDialog(
                       }),
                       acceptedFields: new Set<MetadataField>(),
                       manualDoi: "",
+                      creatorDraft: [{ creatorType: "author" }],
+                      creatorsConfirmed: false,
                     });
                     render(dialog.window.document);
                   },

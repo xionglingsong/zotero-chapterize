@@ -7,6 +7,7 @@ import {
 import { inspectPdf } from "./pdf/inspection";
 import type { Chapter } from "./pdf/outline";
 import { printedRange } from "./pdf/pageLabels";
+import type { ChapterAuthorCandidate } from "./pdf/tocAuthors";
 import {
   createPdfPageSplitter,
   isEncryptedPdfError,
@@ -163,6 +164,7 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
   let totalPages = 0;
   let pdfFingerprint = "";
   let pageLabels: string[] = [];
+  let authorCandidates: Array<ChapterAuthorCandidate | null> = [];
   let sourceKey = "";
   let existingKeys = new Set<string>();
   let existingSections: ExistingSectionsResult = {
@@ -199,6 +201,7 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
     totalPages = inspection.totalPages;
     pdfFingerprint = inspection.fingerprint;
     pageLabels = inspection.pageLabels;
+    authorCandidates = inspection.authorCandidates;
     splitPages = pageSplitter;
     sourceKey = `${pdfAttachment.key}:${pdfFingerprint}`;
     existingSections = await inspectExistingSections(
@@ -237,6 +240,7 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
     pageLabels,
     bookTitle: String(bookItem.getField("title")),
     isbn: String(bookItem.getField("ISBN")),
+    authorCandidates,
     isExistingRange: (startPage, endPage) =>
       existingKeys.has(
         sectionKey({

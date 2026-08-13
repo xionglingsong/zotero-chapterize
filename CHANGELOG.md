@@ -3,6 +3,26 @@
 All notable changes to Chapterize are documented here in Chinese and English.
 Chapterize 的重要更新均在此以中英文记录。
 
+## [0.2.23] - 2026-08-13
+
+### 中文
+
+- Crossref 无可靠匹配时，从明确书签标记的 Contents/目录页提取章节作者候选；支持标题折行、作者另起一行和同一行版式。
+- 作者候选按章节标题严格锚定，来源标记显示目录印刷页码和原始文本；候选默认待确认，不会静默写入 Zotero。
+- 在拆分预览中新增逐作者的名、姓编辑框，以及添加、移除、清空和确认操作；人工修改后自动撤销确认。
+- 顶部摘要显示待确认作者数量；无候选时仍可手工添加作者。
+- Crossref 标题匹配和 DOI 作者继续自动采用，但非空的人工录入作者不会被后续重新匹配覆盖。
+- 保持父书 creators 与章节作者隔离，最终 metadata 只包含明确确认且非空的作者。
+
+### English
+
+- Extracted chapter-author candidates from explicitly bookmarked Contents pages when Crossref has no reliable match, including wrapped-title, next-line, and same-line layouts.
+- Anchored candidates strictly to chapter titles and displayed the printed source page and original text; candidates remain pending and are never silently written to Zotero.
+- Added per-author first/last-name editing plus add, remove, clear, and confirm actions; any manual edit revokes confirmation.
+- Added the number of pending author confirmations to the summary and kept manual author entry available when no candidate exists.
+- Continued to accept Crossref title-match and DOI authors automatically while protecting non-empty manual authors from later rematching.
+- Kept parent creators isolated from chapter authors and serialized only explicitly confirmed, non-empty creators.
+
 ## [0.2.22] - 2026-08-13
 
 ### 中文

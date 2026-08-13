@@ -1,6 +1,9 @@
+import type { ZoteroCreator } from "./crossref";
+
 export type MetadataStatus = "idle" | "loading" | "needs-doi" | "matched";
 export type MetadataStatusTone = "neutral" | "progress" | "warning" | "success";
 export type SectionStatusTone = "new" | "update";
+export type AuthorSource = "toc" | "crossref" | "doi" | "manual";
 
 interface StatusPresentation<TTone extends string> {
   tone: TTone;
@@ -63,4 +66,58 @@ export function shouldDiscardTitleMatch(
   nextTitle: string,
 ): boolean {
   return source === "title" && currentTitle !== nextTitle;
+}
+
+export function authorStatusPresentation(
+  source: AuthorSource | undefined,
+  confirmed: boolean,
+  hasCreators: boolean,
+): StatusPresentation<MetadataStatusTone> {
+  if (!hasCreators) {
+    return {
+      tone: "neutral",
+      labelKey: "dialog-author-add",
+      helpKey: "dialog-author-add-help",
+    };
+  }
+  if (confirmed) {
+    return {
+      tone: "success",
+      labelKey: "dialog-author-confirmed",
+      helpKey: "dialog-author-confirmed-help",
+    };
+  }
+  return source === "toc"
+    ? {
+        tone: "warning",
+        labelKey: "dialog-author-review",
+        helpKey: "dialog-author-review-help",
+      }
+    : {
+        tone: "warning",
+        labelKey: "dialog-author-confirm",
+        helpKey: "dialog-author-confirm-help",
+      };
+}
+
+export function confirmedCreatorMetadata(
+  creators: ZoteroCreator[],
+  confirmed: boolean,
+): ZoteroCreator[] | undefined {
+  if (!confirmed) return undefined;
+  const cleaned = creators
+    .map((creator) => ({
+      creatorType: "author" as const,
+      firstName: creator.firstName?.trim() || undefined,
+      lastName: creator.lastName?.trim() || undefined,
+    }))
+    .filter((creator) => creator.firstName || creator.lastName);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+export function shouldReplaceCreatorDraft(
+  currentSource: AuthorSource | undefined,
+  hasCurrentCreators: boolean,
+): boolean {
+  return currentSource !== "manual" || !hasCurrentCreators;
 }
