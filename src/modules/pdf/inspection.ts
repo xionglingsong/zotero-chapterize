@@ -14,11 +14,13 @@ import {
   readTocAuthorCandidatesFromDocument,
   type ChapterAuthorCandidate,
 } from "./tocAuthors";
+import { readChapterPageAuthorCandidatesFromDocument } from "./chapterPageAuthors";
 
 export interface PdfInspection extends PdfIdentity {
   chapters: Chapter[];
   pageLabels: string[];
   authorCandidates: Array<ChapterAuthorCandidate | null>;
+  chapterPageAuthorCandidates: Array<ChapterAuthorCandidate | null>;
 }
 
 export async function inspectLoadedPdf(
@@ -30,15 +32,16 @@ export async function inspectLoadedPdf(
     readPdfOutlineFromDocument(doc, opts),
     readPageLabelsFromDocument(doc),
   ]);
-  const authorCandidates = await readTocAuthorCandidatesFromDocument(
-    doc,
-    chapters,
-  );
+  const [authorCandidates, chapterPageAuthorCandidates] = await Promise.all([
+    readTocAuthorCandidatesFromDocument(doc, chapters),
+    readChapterPageAuthorCandidatesFromDocument(doc, chapters),
+  ]);
   return {
     ...pdfIdentityFromDocument(doc, fallbackFingerprint),
     chapters,
     pageLabels,
     authorCandidates,
+    chapterPageAuthorCandidates,
   };
 }
 

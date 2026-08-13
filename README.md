@@ -21,6 +21,8 @@ Chapterize 是一个 Zotero 插件，可按 PDF 书签或手动页码范围预�
 - 标题匹配失败时可手动粘贴 DOI，获取完整章节元数据。
 - 提供置信度、字段级预览和逐项接受；父书编者不会被误作章作者。
 - Crossref 无匹配时可从带书签的目录页提取章作者候选，显示来源页并要求人工确认。
+- 目录无作者时可从章节开头两页的标题附近提取署名，并排除编者标签、正文和常见小标题。
+- 目录、章节首页和 Crossref 作者不一致时显示来源冲突，要求用户选择后再确认；可一键确认所有无冲突候选。
 - 可逐个编辑、添加或移除章作者；手工编辑的作者优先于后续自动匹配。
 - 拆分预览支持中文和英文即时切换，默认中文。
 - 继承出版者、日期、ISBN、语言等可靠的父书元数据。
@@ -40,7 +42,7 @@ Chapterize 是一个 Zotero 插件，可按 PDF 书签或手动页码范围预�
 - **拆分范围**始终使用 PDF 中从 1 开始显示的物理页位置。
 - **Pages 元数据**优先使用 PDF `/PageLabels` 中的印刷页码，例如 `iii-xiv` 或 `57-76`；没有页码标签时回退到物理页码。
 - 父书 DOI、URL 和 Extra 不会复制给章节，以免把整本书的标识符错误地当作章节标识符。
-- 父书 creators 不会复制为章作者。章作者可以来自 Crossref/DOI、目录页候选或手工录入；目录候选和手工修改必须明确确认，未确认内容不会写入。
+- 父书 creators 不会复制为章作者。章作者可以来自 Crossref/DOI、目录页、章节首页或手工录入；PDF 候选和手工修改必须明确确认，来源冲突必须先人工选择，未确认内容不会写入。
 
 ### 开发
 
@@ -80,6 +82,8 @@ It supports Zotero 7, 8, and 9 and is tested primarily with Zotero 9.
 - Accept a manually pasted DOI when title matching fails and fetch complete chapter metadata.
 - Show confidence and field-level acceptance; book editors are never treated as chapter authors.
 - Extract chapter-author candidates from bookmarked contents pages when Crossref has no match, show the source page, and require explicit review.
+- When the contents omit authors, extract bylines near the title on the chapter's first two pages while rejecting editor labels, prose, and common subheadings.
+- Flag disagreements between contents, chapter-opening, and Crossref authors for source selection, with one action to confirm all non-conflicting candidates.
 - Edit, add, or remove chapter authors individually; manually edited authors take precedence over later automatic matching.
 - Switch the split preview between Chinese and English, with Chinese as the default.
 - Inherit reliable book metadata such as publisher, date, ISBN, and language.
@@ -99,7 +103,7 @@ After the GitHub Release build is installed once, Zotero checks the public `upda
 - **Splitting** always uses the PDF's physical page positions, displayed from 1 in the editor.
 - **Pages metadata** uses printed labels from the PDF's `/PageLabels`, such as `iii-xiv` or `57-76`, and falls back to physical numbering when labels are unavailable.
 - The parent book's DOI, URL, and Extra are not copied because they should not be presented as chapter identifiers.
-- Parent creators are not copied as chapter authors. Authors may come from Crossref/DOI, contents-page candidates, or manual entry; contents candidates and manual edits require explicit confirmation, and unconfirmed values are never written.
+- Parent creators are not copied as chapter authors. Authors may come from Crossref/DOI, contents pages, chapter opening pages, or manual entry; PDF candidates and manual edits require explicit confirmation, source conflicts require a user choice, and unconfirmed values are never written.
 
 ### Development
 

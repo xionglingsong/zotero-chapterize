@@ -6,7 +6,7 @@ const zhCN: Record<string, string> = {
   "dialog-source-bookmarks": "已从书签读取，共 {pages} 个物理页",
   "dialog-source-manual": "未发现书签，共 {pages} 个物理页",
   "dialog-summary":
-    "已选 {sections} 个 · 待确认作者 {authorPending} 个 · 新建 {pending} 个 · 已存在 {existing} 个 · 覆盖 {covered} 页 · 遗漏 {omitted} 页",
+    "已选 {sections} 个 · 待确认作者 {authorPending} 个 · 冲突 {authorConflicts} 个 · 新建 {pending} 个 · 已存在 {existing} 个 · 覆盖 {covered} 页 · 遗漏 {omitted} 页",
   "dialog-add": "添加章节",
   "dialog-reset": "恢复书签",
   "dialog-select-recommended": "推荐章节",
@@ -49,7 +49,13 @@ const zhCN: Record<string, string> = {
   "dialog-author-add-help": "没有可靠的作者候选；打开后手工填写并确认。",
   "dialog-author-review": "审阅作者",
   "dialog-author-review-help":
-    "已从目录页提取作者候选；确认前不会写入 Zotero。",
+    "已从 PDF 目录或章节首页提取作者候选；确认前不会写入 Zotero。",
+  "dialog-author-conflict": "作者有冲突",
+  "dialog-author-conflict-help":
+    "不同来源给出了不同作者；请选择正确来源并确认，确认前不会写入 Zotero。",
+  "dialog-author-confirm-safe": "确认无冲突作者",
+  "dialog-author-confirm-safe-help":
+    "确认所有已启用、已有候选且不存在来源冲突的章节作者。",
   "dialog-author-confirm": "确认作者",
   "dialog-author-confirm-help": "作者已修改；请确认后再写入 Zotero。",
   "dialog-author-confirmed": "作者已确认",
@@ -61,11 +67,13 @@ const zhCN: Record<string, string> = {
   "dialog-author-remove": "移除此作者",
   "dialog-author-clear": "清空",
   "dialog-author-source-toc": "来源：目录页 {page}",
+  "dialog-author-source-chapter-page": "来源：章节首页 {page}",
   "dialog-author-source-crossref": "来源：Crossref 标题匹配",
   "dialog-author-source-doi": "来源：Crossref DOI",
   "dialog-author-source-manual": "来源：手工编辑",
   "dialog-author-source-empty": "来源：未提供",
-  "dialog-author-toc-raw": "目录原文：{text}",
+  "dialog-author-source-raw": "来源原文：{text}",
+  "dialog-author-choose-source": "选择正确作者来源",
   "dialog-metadata-review":
     "Crossref 字段预览 · 置信度 {confidence}% · 勾选要写入的字段",
   "dialog-metadata-field-title": "标题",
@@ -86,7 +94,7 @@ const zhCN: Record<string, string> = {
   "dialog-doi-invalid": "Crossref 未找到此 DOI，请检查后重试。",
   "dialog-doi-success": "已通过 DOI 获取完整元数据。",
   "dialog-guidance":
-    "作者：目录候选必须审阅确认，人工修改后需重新确认；未确认作者不会写入。元数据：显示“需要 DOI”时可粘贴 DOI 获取。",
+    "作者：PDF 候选必须审阅确认，来源冲突需先选择正确作者；未确认作者不会写入。元数据：显示“需要 DOI”时可粘贴 DOI 获取。",
   "dialog-table-label": "章节拆分计划",
   "dialog-language": "界面语言",
   "dialog-language-zh": "中文",
@@ -107,7 +115,7 @@ const enUS: Record<string, string> = {
   "dialog-source-bookmarks": "Read from bookmarks · {pages} physical pages",
   "dialog-source-manual": "No bookmarks found · {pages} physical pages",
   "dialog-summary":
-    "{sections} selected · {authorPending} authors to confirm · {pending} new · {existing} existing · {covered} pages covered · {omitted} omitted",
+    "{sections} selected · {authorPending} authors to confirm · {authorConflicts} conflicts · {pending} new · {existing} existing · {covered} pages covered · {omitted} omitted",
   "dialog-add": "Add section",
   "dialog-reset": "Reset to bookmarks",
   "dialog-select-recommended": "Recommended",
@@ -155,7 +163,13 @@ const enUS: Record<string, string> = {
     "No reliable author candidate was found. Open to enter and confirm authors manually.",
   "dialog-author-review": "Review authors",
   "dialog-author-review-help":
-    "Author candidates were extracted from the contents page and will not be written until confirmed.",
+    "Author candidates were extracted from the PDF contents or chapter opening page and will not be written until confirmed.",
+  "dialog-author-conflict": "Author conflict",
+  "dialog-author-conflict-help":
+    "Different sources report different authors. Choose the correct source and confirm it before anything is written to Zotero.",
+  "dialog-author-confirm-safe": "Confirm non-conflicting authors",
+  "dialog-author-confirm-safe-help":
+    "Confirm authors for included chapters that have a candidate and no source conflict.",
   "dialog-author-confirm": "Confirm authors",
   "dialog-author-confirm-help":
     "The authors were edited. Confirm them before they are written to Zotero.",
@@ -169,11 +183,13 @@ const enUS: Record<string, string> = {
   "dialog-author-remove": "Remove this author",
   "dialog-author-clear": "Clear",
   "dialog-author-source-toc": "Source: contents page {page}",
+  "dialog-author-source-chapter-page": "Source: chapter opening page {page}",
   "dialog-author-source-crossref": "Source: Crossref title match",
   "dialog-author-source-doi": "Source: Crossref DOI",
   "dialog-author-source-manual": "Source: manual edit",
   "dialog-author-source-empty": "Source: not provided",
-  "dialog-author-toc-raw": "Contents text: {text}",
+  "dialog-author-source-raw": "Source text: {text}",
+  "dialog-author-choose-source": "Choose the correct author source",
   "dialog-metadata-review":
     "Crossref field preview · {confidence}% confidence · select fields to apply",
   "dialog-metadata-field-title": "Title",
@@ -195,7 +211,7 @@ const enUS: Record<string, string> = {
   "dialog-doi-invalid": "Crossref could not find this DOI. Check it and retry.",
   "dialog-doi-success": "Complete metadata fetched by DOI.",
   "dialog-guidance":
-    "Authors: review and confirm contents-page candidates; manual edits require confirmation again. Unconfirmed authors are not written. Paste a DOI when metadata shows DOI needed.",
+    "Authors: review PDF candidates and choose the correct author when sources conflict. Unconfirmed authors are not written. Paste a DOI when metadata shows DOI needed.",
   "dialog-table-label": "Chapter split plan",
   "dialog-language": "Interface language",
   "dialog-language-zh": "中文",

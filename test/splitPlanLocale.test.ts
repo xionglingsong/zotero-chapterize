@@ -26,8 +26,17 @@ describe("split preview language", function () {
       splitPlanText("zh-CN", "dialog-summary", {
         sections: 3,
         authorPending: 2,
+        authorConflicts: 1,
       }),
       "待确认作者 2 个",
+    );
+    assert.include(
+      splitPlanText("zh-CN", "dialog-summary", {
+        sections: 3,
+        authorPending: 2,
+        authorConflicts: 1,
+      }),
+      "冲突 1 个",
     );
   });
 
@@ -59,5 +68,24 @@ describe("split preview language", function () {
     assert.equal(normalizeTitleColumnWidth(200), 320);
     assert.equal(normalizeTitleColumnWidth(640), 640);
     assert.equal(normalizeTitleColumnWidth("invalid"), 520);
+  });
+
+  it("explains author conflicts and bulk confirmation in both languages", function () {
+    assert.include(
+      splitPlanText("zh-CN", "dialog-author-conflict-help"),
+      "来源",
+    );
+    assert.include(
+      splitPlanText("en-US", "dialog-author-conflict-help"),
+      "sources",
+    );
+    assert.equal(
+      splitPlanText("zh-CN", "dialog-author-confirm-safe"),
+      "确认无冲突作者",
+    );
+    assert.equal(
+      splitPlanText("en-US", "dialog-author-confirm-safe"),
+      "Confirm non-conflicting authors",
+    );
   });
 });

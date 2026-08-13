@@ -30,13 +30,22 @@ import {
 } from "./splitPlanLocale";
 import {
   authorStatusPresentation,
+  canBulkConfirmCreators,
   confirmedCreatorMetadata,
+  mergeCreatorCandidate,
   metadataStatusPresentation,
   sectionStatusPresentation,
   shouldDiscardTitleMatch,
   shouldReplaceCreatorDraft,
+  resolveCreatorCandidates,
   type AuthorSource,
+  type CreatorCandidate,
 } from "./splitPlanPresentation";
+
+interface CreatorReviewCandidate extends CreatorCandidate {
+  pageIndex?: number;
+  rawText?: string;
+}
 
 interface EditableRow extends Chapter {
   id: number;
@@ -57,6 +66,8 @@ interface EditableRow extends Chapter {
   creatorSourcePage?: number;
   creatorRawText?: string;
   creatorsConfirmed: boolean;
+  creatorCandidates: CreatorReviewCandidate[];
+  creatorConflict: boolean;
 }
 
 type MetadataField = keyof CrossRefSectionMeta;
@@ -73,6 +84,7 @@ export interface SplitPlanDialogInput {
   bookTitle?: string;
   isbn?: string;
   authorCandidates?: Array<ChapterAuthorCandidate | null>;
+  chapterPageAuthorCandidates?: Array<ChapterAuthorCandidate | null>;
 }
 
 const ids = {
@@ -88,6 +100,7 @@ const ids = {
   cleanTitles: "chapterize-plan-clean-titles",
   restoreTitles: "chapterize-plan-restore-titles",
   matchAll: "chapterize-plan-match-all",
+  confirmAuthors: "chapterize-plan-confirm-authors",
   heading: "chapterize-plan-heading",
   source: "chapterize-plan-source",
   guidance: "chapterize-plan-guidance",
@@ -119,6 +132,28 @@ export async function showSplitPlanDialog(
     );
     return input.detectedChapters.map((chapter, index) => {
       const authorCandidate = input.authorCandidates?.[index];
+      const chapterPageCandidate = input.chapterPageAuthorCandidates?.[index];
+      const localCandidates: CreatorReviewCandidate[] = [];
+      if (authorCandidate) {
+        localCandidates.push({
+          source: "toc" as const,
+          creators: authorCandidate.creators,
+          pageIndex: authorCandidate.pageIndex,
+          rawText: authorCandidate.rawText,
+        });
+      }
+      if (chapterPageCandidate) {
+        localCandidates.push({
+          source: "chapter-page" as const,
+          creators: chapterPageCandidate.creators,
+          pageIndex: chapterPageCandidate.pageIndex,
+          rawText: chapterPageCandidate.rawText,
+        });
+      }
+      const resolution = resolveCreatorCandidates(localCandidates);
+      const selectedCandidate = resolution.selected as
+        | CreatorReviewCandidate
+        | undefined;
       return {
         ...chapter,
         title: cleanTitles ? cleanChapterTitle(chapter.title) : chapter.title,
@@ -129,13 +164,15 @@ export async function showSplitPlanDialog(
         originalTitle: chapter.title,
         acceptedFields: new Set<MetadataField>(),
         manualDoi: "",
-        creatorDraft: authorCandidate?.creators.map((creator) => ({
+        creatorDraft: selectedCandidate?.creators.map((creator) => ({
           ...creator,
         })) ?? [{ creatorType: "author" as const }],
-        creatorSource: authorCandidate ? ("toc" as const) : undefined,
-        creatorSourcePage: authorCandidate?.pageIndex,
-        creatorRawText: authorCandidate?.rawText,
+        creatorSource: selectedCandidate?.source,
+        creatorSourcePage: selectedCandidate?.pageIndex,
+        creatorRawText: selectedCandidate?.rawText,
         creatorsConfirmed: false,
+        creatorCandidates: resolution.alternatives as CreatorReviewCandidate[],
+        creatorConflict: resolution.conflict,
       };
     });
   };
@@ -236,6 +273,28 @@ export async function showSplitPlanDialog(
     row.creatorSourcePage = undefined;
     row.creatorRawText = undefined;
     row.creatorsConfirmed = confirmed;
+    row.creatorCandidates = creators.length
+      ? [{ source, creators: row.creatorDraft }]
+      : [];
+    row.creatorConflict = false;
+    row.acceptedFields.delete("creators");
+  }
+
+  function applyCreatorResolution(
+    row: EditableRow,
+    resolution: ReturnType<typeof resolveCreatorCandidates>,
+    confirmed: boolean,
+  ): void {
+    const selected = resolution.selected as CreatorReviewCandidate | undefined;
+    row.creatorDraft = selected?.creators.map((creator) => ({
+      ...creator,
+    })) ?? [{ creatorType: "author" }];
+    row.creatorSource = selected?.source;
+    row.creatorSourcePage = selected?.pageIndex;
+    row.creatorRawText = selected?.rawText;
+    row.creatorCandidates = resolution.alternatives as CreatorReviewCandidate[];
+    row.creatorConflict = resolution.conflict;
+    row.creatorsConfirmed = confirmed && !resolution.conflict;
     row.acceptedFields.delete("creators");
   }
 
@@ -283,10 +342,13 @@ export async function showSplitPlanDialog(
         !!confirmedCreatorMetadata(row.creatorDraft, true),
       )
     ) {
-      replaceCreatorDraft(
+      const incoming: CreatorReviewCandidate = {
+        source: source === "doi" ? "doi" : "crossref",
+        creators: match.metadata.creators,
+      };
+      applyCreatorResolution(
         row,
-        match.metadata.creators,
-        source === "doi" ? "doi" : "crossref",
+        mergeCreatorCandidate(row.creatorCandidates, incoming),
         true,
       );
     }
@@ -359,6 +421,22 @@ export async function showSplitPlanDialog(
     render(doc);
   }
 
+  function confirmNonConflictingAuthors(doc: Document): void {
+    selectedRows().forEach((row) => {
+      if (
+        canBulkConfirmCreators(
+          row.creatorDraft,
+          row.creatorsConfirmed,
+          row.creatorConflict,
+        )
+      ) {
+        row.creatorDraft = confirmedCreatorMetadata(row.creatorDraft, true)!;
+        row.creatorsConfirmed = true;
+      }
+    });
+    render(doc);
+  }
+
   function setSelection(
     doc: Document,
     selection: (row: EditableRow, index: number) => boolean,
@@ -422,6 +500,22 @@ export async function showSplitPlanDialog(
         !!confirmedCreatorMetadata(row.creatorDraft, true) &&
         !row.creatorsConfirmed,
     ).length;
+    const authorConflicts = selected.filter(
+      (row) => row.creatorConflict,
+    ).length;
+    const confirmAuthors = doc.getElementById(
+      ids.confirmAuthors,
+    ) as HTMLButtonElement | null;
+    if (confirmAuthors) {
+      confirmAuthors.disabled = !selected.some((row) =>
+        canBulkConfirmCreators(
+          row.creatorDraft,
+          row.creatorsConfirmed,
+          row.creatorConflict,
+        ),
+      );
+      confirmAuthors.title = getString("dialog-author-confirm-safe-help");
+    }
     const summaryNode = doc.getElementById(ids.summary);
     const errorNode = doc.getElementById(ids.errors) as HTMLElement | null;
     if (summaryNode) {
@@ -433,6 +527,7 @@ export async function showSplitPlanDialog(
           covered: summary.coveredPages,
           omitted: summary.omittedPages,
           authorPending,
+          authorConflicts,
         },
       });
     }
@@ -489,6 +584,16 @@ export async function showSplitPlanDialog(
                   row.creatorSourcePage + 1),
           },
         });
+      case "chapter-page":
+        return getString("dialog-author-source-chapter-page", {
+          args: {
+            page:
+              row.creatorSourcePage === undefined
+                ? "-"
+                : (input.pageLabels[row.creatorSourcePage] ??
+                  row.creatorSourcePage + 1),
+          },
+        });
       case "crossref":
         return getString("dialog-author-source-crossref");
       case "doi":
@@ -505,6 +610,8 @@ export async function showSplitPlanDialog(
     row.creatorSourcePage = undefined;
     row.creatorRawText = undefined;
     row.creatorsConfirmed = false;
+    row.creatorCandidates = [{ source: "manual", creators: row.creatorDraft }];
+    row.creatorConflict = false;
     row.acceptedFields.delete("creators");
   }
 
@@ -524,10 +631,48 @@ export async function showSplitPlanDialog(
     source.textContent = authorSourceText(row);
     header.append(heading, source);
     editor.append(header);
+    if (row.creatorConflict && row.creatorCandidates.length > 1) {
+      const chooser = doc.createElement("fieldset");
+      chooser.className = "chapterize-author-candidates";
+      const legend = doc.createElement("legend");
+      legend.textContent = getString("dialog-author-choose-source");
+      chooser.append(legend);
+      row.creatorCandidates.forEach((candidate, candidateIndex) => {
+        const option = doc.createElement("button");
+        option.type = "button";
+        option.className = "chapterize-author-candidate";
+        const names = candidate.creators
+          .map((creator) =>
+            [creator.firstName, creator.lastName].filter(Boolean).join(" "),
+          )
+          .join("; ");
+        const candidateRow = {
+          ...row,
+          creatorSource: candidate.source,
+          creatorSourcePage: candidate.pageIndex,
+        };
+        option.textContent = `${authorSourceText(candidateRow)} · ${names}`;
+        option.setAttribute("data-candidate-index", String(candidateIndex));
+        option.addEventListener("click", () => {
+          applyCreatorResolution(
+            row,
+            {
+              selected: candidate,
+              alternatives: [candidate],
+              conflict: false,
+            },
+            false,
+          );
+          render(doc);
+        });
+        chooser.append(option);
+      });
+      editor.append(chooser);
+    }
     if (row.creatorRawText) {
       const raw = doc.createElement("p");
       raw.className = "chapterize-author-raw";
-      raw.textContent = getString("dialog-author-toc-raw", {
+      raw.textContent = getString("dialog-author-source-raw", {
         args: { text: row.creatorRawText },
       });
       editor.append(raw);
@@ -655,6 +800,7 @@ export async function showSplitPlanDialog(
       [ids.cleanTitles]: "dialog-clean-chapter-numbers",
       [ids.restoreTitles]: "dialog-restore-original-titles",
       [ids.matchAll]: "dialog-metadata-match-all",
+      [ids.confirmAuthors]: "dialog-author-confirm-safe",
       [ids.add]: "dialog-add",
       [ids.reset]: "dialog-reset",
       [ids.guidance]: "dialog-guidance",
@@ -859,6 +1005,7 @@ export async function showSplitPlanDialog(
         row.creatorSource,
         row.creatorsConfirmed,
         hasCreators,
+        row.creatorConflict,
       );
       const authorButton = doc.createElement("button");
       authorButton.type = "button";
@@ -1101,9 +1248,13 @@ export async function showSplitPlanDialog(
               .chapterize-author-editor { grid-column: 1 / -1; display: grid; gap: 8px; margin-bottom: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--chapterize-border); }
               .chapterize-author-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
               .chapterize-author-source { padding: 2px 7px; border: 1px solid var(--chapterize-border-strong); border-radius: 999px; background: var(--chapterize-surface); color: var(--chapterize-muted); font-size: .88em; }
-              .chapterize-author-source-toc { border-color: color-mix(in oklch, var(--chapterize-warning) 45%, white); background: var(--chapterize-warning-soft); color: var(--chapterize-warning); }
+              .chapterize-author-source-toc, .chapterize-author-source-chapter-page { border-color: color-mix(in oklch, var(--chapterize-warning) 45%, white); background: var(--chapterize-warning-soft); color: var(--chapterize-warning); }
               .chapterize-author-source-crossref, .chapterize-author-source-doi { border-color: color-mix(in oklch, var(--chapterize-success) 45%, white); background: var(--chapterize-success-soft); color: var(--chapterize-success); }
               .chapterize-author-raw { margin: 0; color: var(--chapterize-muted); font-size: .9em; }
+              .chapterize-author-candidates { display: grid; gap: 6px; margin: 0; padding: 8px; border: 1px solid color-mix(in oklch, var(--chapterize-warning) 45%, white); border-radius: 4px; background: var(--chapterize-warning-soft); }
+              .chapterize-author-candidates legend { padding-inline: 5px; color: var(--chapterize-warning); font-weight: 650; }
+              .chapterize-author-candidate { min-height: 34px; padding: 5px 9px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; text-align: start; }
+              .chapterize-author-candidate:hover { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); }
               .chapterize-author-list { display: grid; gap: 7px; }
               .chapterize-author-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) 34px; align-items: end; gap: 10px; }
               .chapterize-author-row label { display: grid; gap: 3px; color: var(--chapterize-muted); font-size: .88em; }
@@ -1389,6 +1540,22 @@ export async function showSplitPlanDialog(
             },
             {
               tag: "button",
+              id: ids.confirmAuthors,
+              attributes: { type: "button" },
+              properties: {
+                textContent: getString("dialog-author-confirm-safe"),
+                title: getString("dialog-author-confirm-safe-help"),
+              },
+              listeners: [
+                {
+                  type: "click",
+                  listener: () =>
+                    confirmNonConflictingAuthors(dialog.window.document),
+                },
+              ],
+            },
+            {
+              tag: "button",
               id: ids.add,
               attributes: { type: "button" },
               properties: { textContent: getString("dialog-add") },
@@ -1418,6 +1585,8 @@ export async function showSplitPlanDialog(
                       manualDoi: "",
                       creatorDraft: [{ creatorType: "author" }],
                       creatorsConfirmed: false,
+                      creatorCandidates: [],
+                      creatorConflict: false,
                     });
                     render(dialog.window.document);
                   },

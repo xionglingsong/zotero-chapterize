@@ -3,6 +3,24 @@
 All notable changes to Chapterize are documented here in Chinese and English.
 Chapterize 的重要更新均在此以中英文记录。
 
+## [0.2.24] - 2026-08-13
+
+### 中文
+
+- 当目录页没有可靠作者时，仅扫描章节开头最多两个物理页，并在匹配章节标题后的邻近位置提取署名候选。
+- 章节首页解析会拒绝 `Edited by`、编者标签、正文句子以及 Research Methods 等常见小标题，降低把非作者文本写入 Zotero 的风险。
+- 合并目录页、章节首页、Crossref 标题匹配和 DOI 作者来源；相同作者自动折叠，不同作者明确标记为来源冲突。
+- 冲突章节显示所有候选来源和姓名，必须由用户选择并确认后才会写入；DOI 精确结果可清除自动来源冲突，但不会覆盖非空的人工作者。
+- 顶部摘要新增作者冲突数量，并提供“确认无冲突作者”操作；冲突项不会被批量确认越过。
+
+### English
+
+- When the contents page has no reliable author, scan only the first two physical pages of a chapter and extract a byline near the matching chapter title.
+- Reject `Edited by` labels, editor markers, prose sentences, and common subheadings such as Research Methods to reduce false author metadata.
+- Merge contents-page, chapter-opening, Crossref title-match, and DOI author sources; identical authors collapse while disagreements become explicit source conflicts.
+- Show every conflicting source and name for user selection and confirmation; exact DOI results clear automatic-source conflicts but never overwrite non-empty manual authors.
+- Report author conflicts in the summary and add a Confirm non-conflicting authors action that never bypasses conflicted rows.
+
 ## [0.2.23] - 2026-08-13
 
 ### 中文

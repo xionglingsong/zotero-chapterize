@@ -165,6 +165,7 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
   let pdfFingerprint = "";
   let pageLabels: string[] = [];
   let authorCandidates: Array<ChapterAuthorCandidate | null> = [];
+  let chapterPageAuthorCandidates: Array<ChapterAuthorCandidate | null> = [];
   let sourceKey = "";
   let existingKeys = new Set<string>();
   let existingSections: ExistingSectionsResult = {
@@ -202,6 +203,7 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
     pdfFingerprint = inspection.fingerprint;
     pageLabels = inspection.pageLabels;
     authorCandidates = inspection.authorCandidates;
+    chapterPageAuthorCandidates = inspection.chapterPageAuthorCandidates;
     splitPages = pageSplitter;
     sourceKey = `${pdfAttachment.key}:${pdfFingerprint}`;
     existingSections = await inspectExistingSections(
@@ -241,6 +243,7 @@ async function runSplitTarget(target: SplitTarget): Promise<void> {
     bookTitle: String(bookItem.getField("title")),
     isbn: String(bookItem.getField("ISBN")),
     authorCandidates,
+    chapterPageAuthorCandidates,
     isExistingRange: (startPage, endPage) =>
       existingKeys.has(
         sectionKey({

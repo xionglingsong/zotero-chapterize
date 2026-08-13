@@ -26,6 +26,7 @@ describe("PDF inspection", function () {
       fingerprint: "PDF-HASH",
       pageLabels: ["i", "1", "2", "3"],
       authorCandidates: [null],
+      chapterPageAuthorCandidates: [null],
       chapters: [
         {
           title: "Chapter 1",
@@ -50,6 +51,7 @@ describe("PDF inspection", function () {
     assert.equal(result.fingerprint, "pages-1");
     assert.deepEqual(result.pageLabels, []);
     assert.deepEqual(result.authorCandidates, []);
+    assert.deepEqual(result.chapterPageAuthorCandidates, []);
   });
 
   it("extracts unconfirmed author candidates from bookmarked contents pages", async function () {
@@ -91,5 +93,51 @@ describe("PDF inspection", function () {
 
     assert.equal(result.authorCandidates[1]?.rawText, "Agnieszka Chmiel");
     assert.equal(result.authorCandidates[1]?.pageIndex, 0);
+  });
+
+  it("extracts a byline from the first two physical pages of a chapter", async function () {
+    const chapterRef = { num: 1 };
+    const requestedPages: number[] = [];
+    const result = await inspectLoadedPdf({
+      numPages: 5,
+      fingerprints: ["PDF-BYLINE"],
+      getOutline: async () => [
+        {
+          title: "33 Eye-tracking studies in conference interpreting",
+          dest: [chapterRef],
+        },
+      ],
+      getPageIndex: async () => 2,
+      getPageLabels: async () => ["i", "ii", "457", "458", "459"],
+      getPage: async (page: number) => {
+        requestedPages.push(page);
+        return {
+          getTextContent: async () => ({
+            items:
+              page === 3
+                ? [
+                    {
+                      str: "33 Eye-tracking studies in conference interpreting",
+                      transform: [1, 0, 0, 1, 20, 700],
+                      hasEOL: true,
+                    },
+                    {
+                      str: "By Agnieszka Chmiel",
+                      transform: [1, 0, 0, 1, 20, 670],
+                      hasEOL: true,
+                    },
+                  ]
+                : [],
+          }),
+          cleanup() {},
+        };
+      },
+    });
+
+    assert.equal(
+      result.chapterPageAuthorCandidates[0]?.rawText,
+      "By Agnieszka Chmiel",
+    );
+    assert.deepEqual(requestedPages, [3, 4]);
   });
 });

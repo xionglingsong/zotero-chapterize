@@ -3,7 +3,89 @@ import type { ZoteroCreator } from "./crossref";
 export type MetadataStatus = "idle" | "loading" | "needs-doi" | "matched";
 export type MetadataStatusTone = "neutral" | "progress" | "warning" | "success";
 export type SectionStatusTone = "new" | "update";
-export type AuthorSource = "toc" | "crossref" | "doi" | "manual";
+export type AuthorSource =
+  | "toc"
+  | "chapter-page"
+  | "crossref"
+  | "doi"
+  | "manual";
+
+export interface CreatorCandidate {
+  source: AuthorSource;
+  creators: ZoteroCreator[];
+}
+
+export function creatorCandidatesAgree(
+  left: ZoteroCreator[],
+  right: ZoteroCreator[],
+): boolean {
+  const normalize = (creators: ZoteroCreator[]) =>
+    creators
+      .map((creator) =>
+        [creator.firstName, creator.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .normalize("NFKD")
+          .toLocaleLowerCase()
+          .replace(/[^\p{L}\p{N}]+/gu, " ")
+          .trim(),
+      )
+      .filter(Boolean);
+  const normalizedLeft = normalize(left);
+  const normalizedRight = normalize(right);
+  return (
+    normalizedLeft.length > 0 &&
+    normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((name, index) => name === normalizedRight[index])
+  );
+}
+
+export function resolveCreatorCandidates(candidates: CreatorCandidate[]): {
+  selected?: CreatorCandidate;
+  alternatives: CreatorCandidate[];
+  conflict: boolean;
+} {
+  const usable = candidates.filter(
+    (candidate) => candidate.creators.length > 0,
+  );
+  const selected = usable[0];
+  if (!selected) return { alternatives: [], conflict: false };
+  const alternatives = usable.filter(
+    (candidate, index) =>
+      index === 0 ||
+      !creatorCandidatesAgree(selected.creators, candidate.creators),
+  );
+  return {
+    selected,
+    alternatives,
+    conflict: alternatives.length > 1,
+  };
+}
+
+export function mergeCreatorCandidate(
+  current: CreatorCandidate[],
+  incoming: CreatorCandidate,
+): ReturnType<typeof resolveCreatorCandidates> {
+  const manual = current.find(
+    (candidate) =>
+      candidate.source === "manual" && candidate.creators.length > 0,
+  );
+  if (manual) return resolveCreatorCandidates([manual]);
+  if (incoming.source === "doi") return resolveCreatorCandidates([incoming]);
+  const merged = [
+    incoming,
+    ...current.filter((candidate) => candidate !== incoming),
+  ];
+  return resolveCreatorCandidates(merged);
+}
+
+export function canBulkConfirmCreators(
+  creators: ZoteroCreator[],
+  confirmed: boolean,
+  conflict: boolean,
+): boolean {
+  return !confirmed && !conflict && !!confirmedCreatorMetadata(creators, true);
+}
 
 interface StatusPresentation<TTone extends string> {
   tone: TTone;
@@ -72,6 +154,7 @@ export function authorStatusPresentation(
   source: AuthorSource | undefined,
   confirmed: boolean,
   hasCreators: boolean,
+  conflict = false,
 ): StatusPresentation<MetadataStatusTone> {
   if (!hasCreators) {
     return {
@@ -87,7 +170,14 @@ export function authorStatusPresentation(
       helpKey: "dialog-author-confirmed-help",
     };
   }
-  return source === "toc"
+  if (conflict) {
+    return {
+      tone: "warning",
+      labelKey: "dialog-author-conflict",
+      helpKey: "dialog-author-conflict-help",
+    };
+  }
+  return source === "toc" || source === "chapter-page"
     ? {
         tone: "warning",
         labelKey: "dialog-author-review",

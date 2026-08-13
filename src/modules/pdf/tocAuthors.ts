@@ -196,7 +196,10 @@ export function findTocAuthorCandidates(
   });
 }
 
-function textLinesFromContent(content: any, pageIndex: number): TocTextLine[] {
+export function textLinesFromContent(
+  content: any,
+  pageIndex: number,
+): TocTextLine[] {
   const lines: TocTextLine[] = [];
   let current = "";
   let currentY: number | undefined;
