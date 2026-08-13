@@ -8,6 +8,7 @@ declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
       "cleanChapterNumbers": boolean;
+      "interfaceLanguage": string;
     };
   }
 }

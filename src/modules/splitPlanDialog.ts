@@ -1,6 +1,8 @@
-import { getString } from "../utils/locale";
 import { getPref, setPref } from "../utils/prefs";
 import {
+  fetchSectionByDoi,
+  normalizeDoiInput,
+  searchBookSections,
   searchSectionByTitle,
   type CrossRefMatch,
   type CrossRefSectionMeta,
@@ -18,6 +20,7 @@ import {
   recommendedRangeEndPages,
   recommendedSplitSelection,
 } from "./splitPlanSelection";
+import { splitPlanText, type SplitPlanLanguage } from "./splitPlanLocale";
 
 interface EditableRow extends Chapter {
   id: number;
@@ -28,6 +31,10 @@ interface EditableRow extends Chapter {
   metadataLoading?: boolean;
   metadataExpanded?: boolean;
   acceptedFields: Set<MetadataField>;
+  manualDoi: string;
+  doiLoading?: boolean;
+  doiMessageKey?: string;
+  doiError?: boolean;
 }
 
 type MetadataField = keyof CrossRefSectionMeta;
@@ -58,6 +65,11 @@ const ids = {
   cleanTitles: "chapterize-plan-clean-titles",
   restoreTitles: "chapterize-plan-restore-titles",
   matchAll: "chapterize-plan-match-all",
+  heading: "chapterize-plan-heading",
+  source: "chapterize-plan-source",
+  guidance: "chapterize-plan-guidance",
+  language: "chapterize-plan-language",
+  cleanTitlesLabel: "chapterize-plan-clean-titles-label",
 };
 
 /** Show the complete split-plan editor and return only a validated plan. */
@@ -66,6 +78,12 @@ export async function showSplitPlanDialog(
 ): Promise<ChapterPlan[] | null> {
   let nextID = 1;
   let cleanTitles = getPref("cleanChapterNumbers") !== false;
+  let language: SplitPlanLanguage =
+    getPref("interfaceLanguage") === "en-US" ? "en-US" : "zh-CN";
+  const getString = (
+    key: string,
+    options: { args?: Record<string, unknown> } = {},
+  ) => splitPlanText(language, key, options.args);
   const fromDetected = () => {
     const recommended = recommendedSplitSelection(input.detectedChapters);
     const recommendedEnds = recommendedRangeEndPages(
@@ -82,14 +100,23 @@ export async function showSplitPlanDialog(
       detectedEndPage: chapter.endPage,
       originalTitle: chapter.title,
       acceptedFields: new Set<MetadataField>(),
+      manualDoi: "",
     }));
   };
   let rows: EditableRow[] = fromDetected();
   let result: ChapterPlan[] | null = null;
 
   const dialog = new ztoolkit.Dialog(1, 1);
+  let autoMatchStarted = false;
   const data: Record<string, any> = {
-    loadCallback: () => render(dialog.window.document),
+    loadCallback: () => {
+      const doc = dialog.window.document;
+      render(doc);
+      if (!autoMatchStarted) {
+        autoMatchStarted = true;
+        void matchAll(doc);
+      }
+    },
   };
 
   function selectedRows(): EditableRow[] {
@@ -154,34 +181,89 @@ export async function showSplitPlanDialog(
     return accepted;
   }
 
+  function applyMatch(
+    row: EditableRow,
+    match: CrossRefMatch | null,
+    expand = false,
+    acceptAll = false,
+  ): void {
+    row.metadataMatch = match;
+    row.metadataExpanded = !!match && expand;
+    row.acceptedFields = new Set(
+      match
+        ? metadataFields.filter(
+            (field) =>
+              (acceptAll || defaultAcceptedFields.has(field)) &&
+              metadataValue(match.metadata, field) !== "",
+          )
+        : [],
+    );
+    if (match?.metadata.doi) row.manualDoi = match.metadata.doi;
+  }
+
   async function matchRow(row: EditableRow, doc: Document): Promise<void> {
     row.metadataLoading = true;
     render(doc);
-    row.metadataMatch = await searchSectionByTitle(row.title, {
+    const match = await searchSectionByTitle(row.title, {
       bookTitle: input.bookTitle,
       isbn: input.isbn,
     });
     row.metadataLoading = false;
-    row.metadataExpanded = !!row.metadataMatch;
-    row.acceptedFields = new Set(
-      row.metadataMatch
-        ? metadataFields.filter(
-            (field) =>
-              defaultAcceptedFields.has(field) &&
-              metadataValue(row.metadataMatch!.metadata, field) !== "",
-          )
-        : [],
+    applyMatch(row, match);
+    render(doc);
+  }
+
+  async function lookupDoi(row: EditableRow, doc: Document): Promise<void> {
+    const doi = normalizeDoiInput(row.manualDoi);
+    if (!doi) {
+      row.doiError = true;
+      row.doiMessageKey = "dialog-doi-required";
+      render(doc);
+      return;
+    }
+    row.manualDoi = doi;
+    row.doiLoading = true;
+    row.doiError = false;
+    row.doiMessageKey = undefined;
+    render(doc);
+    const metadata = await fetchSectionByDoi(doi);
+    row.doiLoading = false;
+    if (!metadata) {
+      row.doiError = true;
+      row.doiMessageKey = "dialog-doi-invalid";
+      render(doc);
+      return;
+    }
+    applyMatch(
+      row,
+      {
+        metadata,
+        confidence: 1,
+        confidenceLevel: "high",
+        titleSimilarity: 1,
+        bookSimilarity: 1,
+      },
+      true,
+      true,
     );
+    row.doiError = false;
+    row.doiMessageKey = "dialog-doi-success";
     render(doc);
   }
 
   async function matchAll(doc: Document): Promise<void> {
-    const pending = selectedRows();
-    for (let index = 0; index < pending.length; index += 3) {
-      await Promise.all(
-        pending.slice(index, index + 3).map((row) => matchRow(row, doc)),
-      );
-    }
+    const pending = rows.filter((row) => !row.metadataLoading);
+    pending.forEach((row) => (row.metadataLoading = true));
+    render(doc);
+    const matches = await searchBookSections(
+      pending.map((row) => row.title),
+      { bookTitle: input.bookTitle, isbn: input.isbn },
+    );
+    pending.forEach((row, index) => {
+      row.metadataLoading = false;
+      applyMatch(row, matches[index] ?? null);
+    });
+    render(doc);
   }
 
   function setSelection(
@@ -295,9 +377,48 @@ export async function showSplitPlanDialog(
     return printedRange(input.pageLabels, row.startPage, row.endPage);
   }
 
+  function refreshStaticText(doc: Document): void {
+    const labels: Record<string, string> = {
+      [ids.heading]: "dialog-heading",
+      [ids.recommended]: "dialog-select-recommended",
+      [ids.selectAll]: "dialog-select-all",
+      [ids.selectNone]: "dialog-select-none",
+      [ids.invert]: "dialog-select-invert",
+      [ids.cleanTitlesLabel]: "dialog-clean-chapter-numbers",
+      [ids.restoreTitles]: "dialog-restore-original-titles",
+      [ids.matchAll]: "dialog-metadata-match-all",
+      [ids.add]: "dialog-add",
+      [ids.reset]: "dialog-reset",
+      [ids.guidance]: "dialog-guidance",
+      split: "dialog-split",
+      cancel: "dialog-cancel",
+    };
+    for (const [id, key] of Object.entries(labels)) {
+      const node = doc.getElementById(id);
+      if (node) node.textContent = getString(key);
+    }
+    const source = doc.getElementById(ids.source);
+    if (source) {
+      source.textContent = getString(
+        input.detectedChapters.length > 0
+          ? "dialog-source-bookmarks"
+          : "dialog-source-manual",
+        { args: { pages: input.totalPages } },
+      );
+    }
+    doc.querySelectorAll("[data-i18n-key]").forEach((node: Element) => {
+      const element = node as HTMLElement;
+      element.textContent = getString(element.dataset.i18nKey ?? "");
+    });
+    const title = getString("dialog-title");
+    doc.title = title;
+    doc.documentElement?.setAttribute("title", title);
+  }
+
   function render(doc: Document): void {
     const body = doc.getElementById(ids.rows) as HTMLTableSectionElement | null;
     if (!body) return;
+    refreshStaticText(doc);
     body.replaceChildren();
 
     rows.forEach((row, index) => {
@@ -337,6 +458,50 @@ export async function showSplitPlanDialog(
       titleCell.append(title);
       tr.append(titleCell);
 
+      const doiCell = doc.createElement("td");
+      doiCell.className = "chapterize-doi-cell";
+      const doiControls = doc.createElement("div");
+      doiControls.className = "chapterize-doi-controls";
+      const doiInput = doc.createElement("input");
+      doiInput.type = "text";
+      doiInput.value = row.manualDoi;
+      doiInput.placeholder = getString("dialog-doi-placeholder");
+      doiInput.setAttribute("aria-label", getString("dialog-col-doi"));
+      doiInput.classList.toggle("chapterize-input-error", !!row.doiError);
+      const doiMessage = row.doiMessageKey ? getString(row.doiMessageKey) : "";
+      doiInput.title = doiMessage || getString("dialog-doi-lookup-title");
+      doiInput.addEventListener("input", () => {
+        row.manualDoi = doiInput.value;
+        row.doiError = false;
+        row.doiMessageKey = undefined;
+      });
+      doiInput.addEventListener("keydown", (event: KeyboardEvent) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          void lookupDoi(row, doc);
+        }
+      });
+      const doiLookup = doc.createElement("button");
+      doiLookup.type = "button";
+      doiLookup.className = "chapterize-doi-lookup";
+      doiLookup.disabled = !!row.doiLoading;
+      doiLookup.textContent = row.doiLoading
+        ? "…"
+        : getString("dialog-doi-lookup");
+      doiLookup.title = getString("dialog-doi-lookup-title");
+      doiLookup.addEventListener("click", () => void lookupDoi(row, doc));
+      doiControls.append(doiInput, doiLookup);
+      doiCell.append(doiControls);
+      if (doiMessage) {
+        const message = doc.createElement("div");
+        message.className = row.doiError
+          ? "chapterize-doi-message chapterize-doi-message-error"
+          : "chapterize-doi-message";
+        message.textContent = doiMessage;
+        doiCell.append(message);
+      }
+      tr.append(doiCell);
+
       const metadataCell = doc.createElement("td");
       metadataCell.className = "chapterize-metadata-cell";
       const matchButton = doc.createElement("button");
@@ -355,6 +520,9 @@ export async function showSplitPlanDialog(
             ? getString("dialog-metadata-none")
             : getString("dialog-metadata-find");
       matchButton.title = getString("dialog-metadata-find-title");
+      if (row.metadataMatch === null) {
+        matchButton.title = getString("dialog-metadata-none-help");
+      }
       matchButton.addEventListener("click", () => {
         if (row.metadataMatch) {
           row.metadataExpanded = !row.metadataExpanded;
@@ -383,6 +551,11 @@ export async function showSplitPlanDialog(
         ),
       );
       status.className = "chapterize-status";
+      status.title = getString(
+        input.isExistingRange(row.startPage, row.endPage)
+          ? "dialog-status-existing-help"
+          : "dialog-status-new-help",
+      );
       for (const field of ["startPage", "endPage"] as const) {
         const cell = doc.createElement("td");
         const page = doc.createElement("input");
@@ -406,6 +579,9 @@ export async function showSplitPlanDialog(
           const exists = input.isExistingRange(row.startPage, row.endPage);
           status.textContent = getString(
             exists ? "dialog-status-existing" : "dialog-status-new",
+          );
+          status.title = getString(
+            exists ? "dialog-status-existing-help" : "dialog-status-new-help",
           );
           status.classList.toggle("chapterize-status-existing", exists);
           refreshStatus(doc);
@@ -436,7 +612,7 @@ export async function showSplitPlanDialog(
         const detailsRow = doc.createElement("tr");
         detailsRow.className = "chapterize-metadata-details-row";
         const detailsCell = doc.createElement("td");
-        detailsCell.colSpan = 10;
+        detailsCell.colSpan = 11;
         const details = doc.createElement("div");
         details.className = "chapterize-metadata-details";
         const heading = doc.createElement("strong");
@@ -506,10 +682,13 @@ export async function showSplitPlanDialog(
               *, *::before, *::after { box-sizing: inherit; }
               body > vbox, body > vbox > hbox:first-child, body > vbox > hbox:first-child > vbox { min-height: 0; overflow: hidden; }
               body > vbox > hbox:last-child { flex-shrink: 0; gap: 8px; padding: 10px 20px 12px; border-top: 1px solid var(--chapterize-border); background: var(--chapterize-surface); }
-              .chapterize-dialog { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 12px; min-width: 700px; width: 100%; height: 100%; min-height: 0; padding: 18px 20px 10px; overflow: hidden; color: var(--chapterize-ink); font: menu; }
+              .chapterize-dialog { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; gap: 10px; min-width: 900px; width: 100%; height: 100%; min-height: 0; padding: 18px 20px 10px; overflow: hidden; color: var(--chapterize-ink); font: menu; }
               .chapterize-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
               .chapterize-header h1 { margin: 0; color: var(--chapterize-blue-ink); font-size: 20px; font-weight: 650; letter-spacing: 0; }
+              .chapterize-header-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
               .chapterize-source { color: var(--chapterize-muted); }
+              .chapterize-language { display: inline-flex; align-items: center; gap: 6px; color: var(--chapterize-muted); }
+              .chapterize-language select { min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
               .chapterize-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); }
               .chapterize-toolbar button, .chapterize-delete, #split, #cancel { min-height: 32px; margin: 0; border: 1px solid var(--chapterize-border-strong); border-radius: 5px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out; }
               .chapterize-toolbar button { padding: 4px 10px; }
@@ -520,6 +699,7 @@ export async function showSplitPlanDialog(
               #chapterize-plan-recommended { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font-weight: 600; }
               .chapterize-toolbar-separator { width: 1px; height: 24px; margin: 0 2px; background: var(--chapterize-border); }
               .chapterize-summary { margin-left: auto; color: var(--chapterize-muted); font-variant-numeric: tabular-nums; }
+              .chapterize-guidance { padding: 8px 10px; border-left: 3px solid var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); line-height: 1.4; }
               .chapterize-table-wrap { min-height: 0; overflow: auto; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); }
               table { width: 100%; border-collapse: collapse; table-layout: fixed; }
               th { position: sticky; top: 0; z-index: 1; background: var(--chapterize-surface-subtle); color: var(--chapterize-blue-ink); text-align: left; font-weight: 650; }
@@ -529,12 +709,13 @@ export async function showSplitPlanDialog(
               tbody tr:last-child td { border-bottom: 0; }
               th:nth-child(1), td:nth-child(1) { width: 68px; text-align: center; }
               th:nth-child(2), td:nth-child(2) { width: 42px; color: var(--chapterize-muted); }
-              th:nth-child(4), td:nth-child(4) { width: 110px; }
-              th:nth-child(5), td:nth-child(5), th:nth-child(6), td:nth-child(6) { width: 92px; }
-              th:nth-child(7), td:nth-child(7) { width: 118px; }
-              th:nth-child(8), td:nth-child(8) { width: 64px; }
-              th:nth-child(9), td:nth-child(9) { width: 82px; }
-              th:nth-child(10), td:nth-child(10) { width: 88px; }
+              th:nth-child(4), td:nth-child(4) { width: 250px; }
+              th:nth-child(5), td:nth-child(5) { width: 110px; }
+              th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { width: 92px; }
+              th:nth-child(8), td:nth-child(8) { width: 118px; }
+              th:nth-child(9), td:nth-child(9) { width: 64px; }
+              th:nth-child(10), td:nth-child(10) { width: 90px; }
+              th:nth-child(11), td:nth-child(11) { width: 88px; }
               td input[type="text"], td input[type="number"] { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
               td input[type="checkbox"] { accent-color: var(--chapterize-blue); }
               .chapterize-title-cell { padding-block: 6px; }
@@ -552,6 +733,11 @@ export async function showSplitPlanDialog(
               .chapterize-clean-toggle { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 4px; color: var(--chapterize-ink); white-space: nowrap; }
               .chapterize-clean-toggle input { accent-color: var(--chapterize-blue); }
               .chapterize-match { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font: inherit; }
+              .chapterize-doi-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; }
+              .chapterize-doi-lookup { min-width: 48px; min-height: 30px; border: 1px solid var(--chapterize-blue); border-radius: 4px; background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font: inherit; }
+              .chapterize-input-error { border-color: var(--chapterize-danger) !important; background: var(--chapterize-danger-soft) !important; }
+              .chapterize-doi-message { margin-top: 4px; color: var(--chapterize-blue-ink); font-size: .9em; line-height: 1.25; }
+              .chapterize-doi-message-error { color: var(--chapterize-danger); }
               .chapterize-metadata-details-row:hover { background: var(--chapterize-surface); }
               .chapterize-metadata-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 6px 14px; padding: 10px 12px; border-left: 3px solid var(--chapterize-blue); background: var(--chapterize-surface-subtle); }
               .chapterize-metadata-details > strong { grid-column: 1 / -1; color: var(--chapterize-blue-ink); }
@@ -573,19 +759,71 @@ export async function showSplitPlanDialog(
           children: [
             {
               tag: "h1",
+              id: ids.heading,
               properties: { textContent: getString("dialog-heading") },
             },
             {
-              tag: "span",
-              classList: ["chapterize-source"],
-              properties: {
-                textContent: getString(
-                  input.detectedChapters.length > 0
-                    ? "dialog-source-bookmarks"
-                    : "dialog-source-manual",
-                  { args: { pages: input.totalPages } },
-                ),
-              },
+              tag: "div",
+              classList: ["chapterize-header-tools"],
+              children: [
+                {
+                  tag: "span",
+                  id: ids.source,
+                  classList: ["chapterize-source"],
+                  properties: {
+                    textContent: getString(
+                      input.detectedChapters.length > 0
+                        ? "dialog-source-bookmarks"
+                        : "dialog-source-manual",
+                      { args: { pages: input.totalPages } },
+                    ),
+                  },
+                },
+                {
+                  tag: "label",
+                  classList: ["chapterize-language"],
+                  children: [
+                    {
+                      tag: "span",
+                      attributes: { "data-i18n-key": "dialog-language" },
+                      properties: { textContent: getString("dialog-language") },
+                    },
+                    {
+                      tag: "select",
+                      id: ids.language,
+                      children: [
+                        {
+                          tag: "option",
+                          attributes: { value: "zh-CN" },
+                          properties: {
+                            textContent: getString("dialog-language-zh"),
+                            selected: language === "zh-CN",
+                          },
+                        },
+                        {
+                          tag: "option",
+                          attributes: { value: "en-US" },
+                          properties: {
+                            textContent: getString("dialog-language-en"),
+                            selected: language === "en-US",
+                          },
+                        },
+                      ],
+                      listeners: [
+                        {
+                          type: "change",
+                          listener: (event: Event) => {
+                            language = (event.target as HTMLSelectElement)
+                              .value as SplitPlanLanguage;
+                            setPref("interfaceLanguage", language);
+                            render(dialog.window.document);
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
             },
           ],
         },
@@ -687,6 +925,7 @@ export async function showSplitPlanDialog(
                 },
                 {
                   tag: "span",
+                  id: ids.cleanTitlesLabel,
                   properties: {
                     textContent: getString("dialog-clean-chapter-numbers"),
                   },
@@ -754,6 +993,7 @@ export async function showSplitPlanDialog(
                         args: { number: rows.length + 1 },
                       }),
                       acceptedFields: new Set<MetadataField>(),
+                      manualDoi: "",
                     });
                     render(dialog.window.document);
                   },
@@ -787,6 +1027,13 @@ export async function showSplitPlanDialog(
         },
         {
           tag: "div",
+          id: ids.guidance,
+          classList: ["chapterize-guidance"],
+          attributes: { role: "note" },
+          properties: { textContent: getString("dialog-guidance") },
+        },
+        {
+          tag: "div",
           classList: ["chapterize-table-wrap"],
           children: [
             {
@@ -801,6 +1048,7 @@ export async function showSplitPlanDialog(
                         "dialog-col-include",
                         "dialog-col-number",
                         "dialog-col-title",
+                        "dialog-col-doi",
                         "dialog-col-metadata",
                         "dialog-col-start",
                         "dialog-col-end",
@@ -810,6 +1058,7 @@ export async function showSplitPlanDialog(
                         "dialog-col-actions",
                       ].map((key) => ({
                         tag: "th",
+                        attributes: { "data-i18n-key": key },
                         properties: { textContent: getString(key as any) },
                       })),
                     },
@@ -852,7 +1101,7 @@ export async function showSplitPlanDialog(
     })
     .setDialogData(data)
     .open(getString("dialog-title"), {
-      width: 1050,
+      width: 1320,
       height: 650,
       centerscreen: true,
       resizable: true,

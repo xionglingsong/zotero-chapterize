@@ -3,6 +3,24 @@
 All notable changes to Chapterize are documented here in Chinese and English.
 Chapterize 的重要更新均在此以中英文记录。
 
+## [0.2.20] - 2026-08-13
+
+### 中文
+
+- 在拆分预览中新增 DOI 栏，按母书 ISBN/书名批量匹配 Crossref 并自动填入 DOI。
+- 标题匹配失败时支持粘贴 DOI 或 doi.org 链接，精确获取完整章节元数据。
+- 为“未匹配”和“新建/已存在”状态增加页面说明与悬浮提示。
+- 拆分预览新增中文/英文即时切换，默认中文并记住用户选择。
+- DOI 精确查询默认勾选全部非空 Crossref 字段，仍可逐项取消。
+
+### English
+
+- Added an editable DOI column that batch-matches Crossref by parent ISBN/book title and fills DOI values automatically.
+- Added exact metadata lookup from a pasted DOI or doi.org URL when title matching fails.
+- Added inline guidance and tooltips explaining “No match” and “New/Existing” item status.
+- Added live Chinese/English switching in the split preview, defaulting to Chinese and remembering the choice.
+- Exact DOI lookup selects every non-empty Crossref field by default while preserving field-level opt-out.
+
 ## [0.2.19] - 2026-08-13
 
 ### 中文

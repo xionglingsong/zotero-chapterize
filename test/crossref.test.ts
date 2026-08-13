@@ -2,6 +2,7 @@ import { assert } from "chai";
 import {
   chooseCrossRefMatch,
   mapCrossRefMessage,
+  normalizeDoiInput,
 } from "../src/modules/crossref";
 
 const eyeTrackingChapter = {
@@ -19,6 +20,17 @@ const eyeTrackingChapter = {
 };
 
 describe("Crossref chapter matching", function () {
+  it("normalizes DOI labels and resolver URLs pasted by users", function () {
+    assert.equal(
+      normalizeDoiInput(" https://doi.org/10.4324/9780429297878-40 "),
+      "10.4324/9780429297878-40",
+    );
+    assert.equal(
+      normalizeDoiInput("DOI: 10.4324/9780429297878-40"),
+      "10.4324/9780429297878-40",
+    );
+  });
+
   it("maps chapter authors and citation fields without using book editors", function () {
     assert.deepInclude(mapCrossRefMessage(eyeTrackingChapter), {
       title: "Eye-tracking studies in conference interpreting",

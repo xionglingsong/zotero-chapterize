@@ -15,8 +15,12 @@ Chapterize 是一个 Zotero 插件，可按 PDF 书签或手动页码范围预�
 - 在拆分前预览、选择、重命名和修改物理页范围。
 - 同时显示物理页码、印刷页码、覆盖页数、遗漏和重叠错误。
 - 智能选择正文章节，并正确覆盖未选中的嵌套子书签。
-- 自动清理 `Chapter 5:`、`Ch. IV`、`第五章` 等结构性前缀。
-- 继承 creators、出版者、日期、ISBN、语言等可靠的父书元数据。
+- 自动清理章节编号，并可在预览中恢复原始标题。
+- 自动按 ISBN、书名和章节标题匹配 Crossref，并填入 DOI。
+- 标题匹配失败时可手动粘贴 DOI，获取完整章节元数据。
+- 提供置信度、字段级预览和逐项接受；父书编者不会被误作章作者。
+- 拆分预览支持中文和英文即时切换，默认中文。
+- 继承出版者、日期、ISBN、语言等可靠的父书元数据。
 - 使用来源指纹和物理页范围去重，避免重复拆分。
 - 检测加密 PDF，并在创建附件失败时回滚不完整条目。
 
@@ -33,7 +37,7 @@ Chapterize 是一个 Zotero 插件，可按 PDF 书签或手动页码范围预�
 - **拆分范围**始终使用 PDF 中从 1 开始显示的物理页位置。
 - **Pages 元数据**优先使用 PDF `/PageLabels` 中的印刷页码，例如 `iii-xiv` 或 `57-76`；没有页码标签时回退到物理页码。
 - 父书 DOI、URL 和 Extra 不会复制给章节，以免把整本书的标识符错误地当作章节标识符。
-- 父书 creators 会保留原有角色。若父书只有编者，章节会继承为 Editor；插件不会猜测每章的真实作者。
+- 父书 creators 不会复制为章作者。章作者仅来自用户确认的 Crossref/DOI 元数据；没有可靠来源时保持为空。
 
 ### 开发
 
@@ -67,8 +71,12 @@ It supports Zotero 7, 8, and 9 and is tested primarily with Zotero 9.
 - Preview, select, rename, and edit physical page ranges before writing files.
 - Show physical pages, printed page labels, coverage, omissions, and overlap errors.
 - Recommend content chapters while correctly spanning unselected nested bookmarks.
-- Remove structural prefixes such as `Chapter 5:`, `Ch. IV`, and `第五章`.
-- Inherit reliable book metadata such as creators, publisher, date, ISBN, and language.
+- Remove chapter-number prefixes and restore original titles from the preview.
+- Match Crossref automatically by ISBN, book title, and chapter title to fill DOI values.
+- Accept a manually pasted DOI when title matching fails and fetch complete chapter metadata.
+- Show confidence and field-level acceptance; book editors are never treated as chapter authors.
+- Switch the split preview between Chinese and English, with Chinese as the default.
+- Inherit reliable book metadata such as publisher, date, ISBN, and language.
 - Deduplicate by source fingerprint and physical page range.
 - Detect encrypted PDFs and roll back incomplete items when attachment creation fails.
 
@@ -85,7 +93,7 @@ After the GitHub Release build is installed once, Zotero checks the public `upda
 - **Splitting** always uses the PDF's physical page positions, displayed from 1 in the editor.
 - **Pages metadata** uses printed labels from the PDF's `/PageLabels`, such as `iii-xiv` or `57-76`, and falls back to physical numbering when labels are unavailable.
 - The parent book's DOI, URL, and Extra are not copied because they should not be presented as chapter identifiers.
-- Parent creators retain their original roles. If a book contains only editors, sections inherit Editors; Chapterize does not guess chapter authors.
+- Parent creators are not copied as chapter authors. Authors come only from user-accepted Crossref/DOI metadata and remain empty when no reliable source is available.
 
 ### Development
 

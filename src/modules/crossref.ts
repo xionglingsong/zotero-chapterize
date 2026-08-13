@@ -34,6 +34,14 @@ const API = "https://api.crossref.org/works";
 const UA =
   "Chapterize Zotero plugin (https://github.com/xionglingsong/zotero-chapterize; mailto:noreply@example.com)";
 
+export function normalizeDoiInput(value: string): string {
+  return value
+    .trim()
+    .replace(/^doi:\s*/i, "")
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")
+    .trim();
+}
+
 async function getJson(url: string): Promise<any | null> {
   try {
     const request = (Zotero as any)?.HTTP?.request;
@@ -148,7 +156,9 @@ export function chooseCrossRefMatch(
 export async function fetchSectionByDoi(
   doi: string,
 ): Promise<CrossRefSectionMeta | null> {
-  const json = await getJson(`${API}/${encodeURIComponent(doi.trim())}`);
+  const normalizedDoi = normalizeDoiInput(doi);
+  if (!normalizedDoi) return null;
+  const json = await getJson(`${API}/${encodeURIComponent(normalizedDoi)}`);
   return mapCrossRefMessage(json?.message);
 }
 
@@ -177,5 +187,34 @@ export async function searchSectionByTitle(
     chapterTitle,
     opts.bookTitle,
     json?.message?.items ?? [],
+  );
+}
+
+/** Fetch a book's chapter records once and match every outline title locally. */
+export async function searchBookSections(
+  chapterTitles: string[],
+  opts: { bookTitle?: string; isbn?: string } = {},
+): Promise<Array<CrossRefMatch | null>> {
+  if (chapterTitles.length === 0) return [];
+  const params = new URLSearchParams({ rows: "100" });
+  if (opts.bookTitle) params.set("query.container-title", opts.bookTitle);
+  const isbn = opts.isbn?.replace(/[^0-9X]/gi, "");
+  params.set(
+    "filter",
+    isbn && (isbn.length === 10 || isbn.length === 13)
+      ? `type:book-chapter,isbn:${isbn}`
+      : "type:book-chapter",
+  );
+  let json = await getJson(`${API}?${params.toString()}`);
+  if (
+    !json?.message?.items?.length &&
+    params.get("filter")?.includes("isbn:")
+  ) {
+    params.set("filter", "type:book-chapter");
+    json = await getJson(`${API}?${params.toString()}`);
+  }
+  const messages = json?.message?.items ?? [];
+  return chapterTitles.map((title) =>
+    chooseCrossRefMatch(title, opts.bookTitle, messages),
   );
 }

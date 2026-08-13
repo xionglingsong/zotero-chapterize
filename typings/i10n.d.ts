@@ -73,6 +73,7 @@ export type FluentMessageId =
   | 'pref-clean-chapter-numbers'
   | 'pref-description'
   | 'pref-help'
+  | 'pref-interface-language'
   | 'pref-title'
   | 'progress-done'
   | 'progress-metadata-repaired'
