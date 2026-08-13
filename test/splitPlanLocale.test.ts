@@ -1,5 +1,9 @@
 import { assert } from "chai";
-import { splitPlanText } from "../src/modules/splitPlanLocale";
+import {
+  normalizeSplitPlanLanguage,
+  normalizeTitleColumnWidth,
+  splitPlanText,
+} from "../src/modules/splitPlanLocale";
 
 describe("split preview language", function () {
   it("provides Chinese as the explicit default UI language", function () {
@@ -15,5 +19,13 @@ describe("split preview language", function () {
       }),
       "98% match",
     );
+  });
+
+  it("keeps language and title-width preferences in supported ranges", function () {
+    assert.equal(normalizeSplitPlanLanguage("en-US"), "en-US");
+    assert.equal(normalizeSplitPlanLanguage("fr-FR"), "zh-CN");
+    assert.equal(normalizeTitleColumnWidth(200), 320);
+    assert.equal(normalizeTitleColumnWidth(640), 640);
+    assert.equal(normalizeTitleColumnWidth("invalid"), 520);
   });
 });

@@ -13,6 +13,7 @@ Chapterize 是一个 Zotero 插件，可按 PDF 书签或手动页码范围预�
 - 从“书籍”条目或其 PDF 附件启动拆分。
 - 读取 PDF 一、二级书签；没有书签时可手动添加范围。
 - 在拆分前预览、选择、重命名和修改物理页范围。
+- 可调节标题栏宽度，完整标题也可通过悬浮提示查看。
 - 同时显示物理页码、印刷页码、覆盖页数、遗漏和重叠错误。
 - 智能选择正文章节，并正确覆盖未选中的嵌套子书签。
 - 自动清理章节编号，并可在预览中恢复原始标题。
@@ -69,6 +70,7 @@ It supports Zotero 7, 8, and 9 and is tested primarily with Zotero 9.
 - Start from a Book item or one of its PDF attachments.
 - Read level 1-2 PDF bookmarks or create a manual plan when no outline exists.
 - Preview, select, rename, and edit physical page ranges before writing files.
+- Resize the title column and inspect complete long titles from hover text.
 - Show physical pages, printed page labels, coverage, omissions, and overlap errors.
 - Recommend content chapters while correctly spanning unselected nested bookmarks.
 - Remove chapter-number prefixes and restore original titles from the preview.

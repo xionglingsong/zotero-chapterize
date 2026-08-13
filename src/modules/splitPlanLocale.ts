@@ -66,6 +66,7 @@ const zhCN: Record<string, string> = {
   "dialog-language": "界面语言",
   "dialog-language-zh": "中文",
   "dialog-language-en": "English",
+  "dialog-title-width": "标题栏宽度",
   "dialog-cancel": "取消",
   "dialog-split": "开始拆分",
   "dialog-error-empty": "请至少启用一个章节。",
@@ -144,6 +145,7 @@ const enUS: Record<string, string> = {
   "dialog-language": "Interface language",
   "dialog-language-zh": "中文",
   "dialog-language-en": "English",
+  "dialog-title-width": "Title width",
   "dialog-cancel": "Cancel",
   "dialog-split": "Split PDF",
   "dialog-error-empty": "Include at least one section.",
@@ -162,4 +164,13 @@ export function splitPlanText(
   return template.replace(/\{(\w+)\}/g, (_match, name: string) =>
     String(args[name] ?? `{${name}}`),
   );
+}
+
+export function normalizeSplitPlanLanguage(value: unknown): SplitPlanLanguage {
+  return value === "en-US" ? "en-US" : "zh-CN";
+}
+
+export function normalizeTitleColumnWidth(value: unknown): number {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? Math.min(800, Math.max(320, number)) : 520;
 }

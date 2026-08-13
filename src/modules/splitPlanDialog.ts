@@ -20,7 +20,12 @@ import {
   recommendedRangeEndPages,
   recommendedSplitSelection,
 } from "./splitPlanSelection";
-import { splitPlanText, type SplitPlanLanguage } from "./splitPlanLocale";
+import {
+  normalizeSplitPlanLanguage,
+  normalizeTitleColumnWidth,
+  splitPlanText,
+  type SplitPlanLanguage,
+} from "./splitPlanLocale";
 
 interface EditableRow extends Chapter {
   id: number;
@@ -30,6 +35,7 @@ interface EditableRow extends Chapter {
   metadataMatch?: CrossRefMatch | null;
   metadataLoading?: boolean;
   metadataExpanded?: boolean;
+  metadataSource?: "title" | "doi";
   acceptedFields: Set<MetadataField>;
   manualDoi: string;
   doiLoading?: boolean;
@@ -69,7 +75,8 @@ const ids = {
   source: "chapterize-plan-source",
   guidance: "chapterize-plan-guidance",
   language: "chapterize-plan-language",
-  cleanTitlesLabel: "chapterize-plan-clean-titles-label",
+  titleWidth: "chapterize-plan-title-width",
+  titleWidthValue: "chapterize-plan-title-width-value",
 };
 
 /** Show the complete split-plan editor and return only a validated plan. */
@@ -78,8 +85,10 @@ export async function showSplitPlanDialog(
 ): Promise<ChapterPlan[] | null> {
   let nextID = 1;
   let cleanTitles = getPref("cleanChapterNumbers") !== false;
-  let language: SplitPlanLanguage =
-    getPref("interfaceLanguage") === "en-US" ? "en-US" : "zh-CN";
+  let language: SplitPlanLanguage = normalizeSplitPlanLanguage(
+    getPref("interfaceLanguage"),
+  );
+  let titleColumnWidth = normalizeTitleColumnWidth(getPref("titleColumnWidth"));
   const getString = (
     key: string,
     options: { args?: Record<string, unknown> } = {},
@@ -186,8 +195,10 @@ export async function showSplitPlanDialog(
     match: CrossRefMatch | null,
     expand = false,
     acceptAll = false,
+    source: "title" | "doi" = "title",
   ): void {
     row.metadataMatch = match;
+    row.metadataSource = match ? source : undefined;
     row.metadataExpanded = !!match && expand;
     row.acceptedFields = new Set(
       match
@@ -245,6 +256,7 @@ export async function showSplitPlanDialog(
       },
       true,
       true,
+      "doi",
     );
     row.doiError = false;
     row.doiMessageKey = "dialog-doi-success";
@@ -252,7 +264,7 @@ export async function showSplitPlanDialog(
   }
 
   async function matchAll(doc: Document): Promise<void> {
-    const pending = rows.filter((row) => !row.metadataLoading);
+    const pending = selectedRows().filter((row) => !row.metadataLoading);
     pending.forEach((row) => (row.metadataLoading = true));
     render(doc);
     const matches = await searchBookSections(
@@ -384,7 +396,7 @@ export async function showSplitPlanDialog(
       [ids.selectAll]: "dialog-select-all",
       [ids.selectNone]: "dialog-select-none",
       [ids.invert]: "dialog-select-invert",
-      [ids.cleanTitlesLabel]: "dialog-clean-chapter-numbers",
+      [ids.cleanTitles]: "dialog-clean-chapter-numbers",
       [ids.restoreTitles]: "dialog-restore-original-titles",
       [ids.matchAll]: "dialog-metadata-match-all",
       [ids.add]: "dialog-add",
@@ -406,6 +418,27 @@ export async function showSplitPlanDialog(
         { args: { pages: input.totalPages } },
       );
     }
+    const languageSelect = doc.getElementById(
+      ids.language,
+    ) as HTMLSelectElement | null;
+    if (languageSelect) {
+      languageSelect.value = language;
+      Array.from(languageSelect.options).forEach((node) => {
+        const option = node as HTMLOptionElement;
+        option.selected = option.value === language;
+      });
+    }
+    const titleWidth = doc.getElementById(
+      ids.titleWidth,
+    ) as HTMLInputElement | null;
+    if (titleWidth) titleWidth.value = String(titleColumnWidth);
+    const titleWidthValue = doc.getElementById(ids.titleWidthValue);
+    if (titleWidthValue) titleWidthValue.textContent = `${titleColumnWidth}px`;
+    const root = doc.querySelector(".chapterize-dialog") as HTMLElement | null;
+    root?.style.setProperty(
+      "--chapterize-title-width",
+      `${titleColumnWidth}px`,
+    );
     doc.querySelectorAll("[data-i18n-key]").forEach((node: Element) => {
       const element = node as HTMLElement;
       element.textContent = getString(element.dataset.i18nKey ?? "");
@@ -453,6 +486,13 @@ export async function showSplitPlanDialog(
       title.addEventListener("input", () => {
         row.title = title.value;
         title.title = title.value;
+        if (row.metadataSource === "title") {
+          row.metadataMatch = undefined;
+          row.metadataSource = undefined;
+          row.metadataExpanded = false;
+          row.acceptedFields.clear();
+          row.manualDoi = "";
+        }
         refreshStatus(doc);
       });
       titleCell.append(title);
@@ -688,20 +728,20 @@ export async function showSplitPlanDialog(
               .chapterize-header-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
               .chapterize-source { color: var(--chapterize-muted); }
               .chapterize-language { display: inline-flex; align-items: center; gap: 6px; color: var(--chapterize-muted); }
-              .chapterize-language select { min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
+              .chapterize-language select { width: 112px; min-height: 32px; padding: 3px 28px 3px 8px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
               .chapterize-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); }
               .chapterize-toolbar button, .chapterize-delete, #split, #cancel { min-height: 32px; margin: 0; border: 1px solid var(--chapterize-border-strong); border-radius: 5px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out; }
               .chapterize-toolbar button { padding: 4px 10px; }
               .chapterize-toolbar button:hover, .chapterize-delete:hover, #cancel:hover { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); }
               .chapterize-toolbar button:active, .chapterize-delete:active, #cancel:active { background: var(--chapterize-surface-subtle); }
               .chapterize-toolbar button:disabled { border-color: var(--chapterize-border); color: var(--chapterize-muted); opacity: .58; }
-              .chapterize-toolbar button:focus-visible, .chapterize-delete:focus-visible, #split:focus-visible, #cancel:focus-visible, input:focus-visible { outline: 2px solid var(--chapterize-blue); outline-offset: 2px; }
+              .chapterize-toolbar button:focus-visible, .chapterize-delete:focus-visible, .chapterize-doi-lookup:focus-visible, #split:focus-visible, #cancel:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--chapterize-blue); outline-offset: 2px; }
               #chapterize-plan-recommended { border-color: var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font-weight: 600; }
               .chapterize-toolbar-separator { width: 1px; height: 24px; margin: 0 2px; background: var(--chapterize-border); }
               .chapterize-summary { margin-left: auto; color: var(--chapterize-muted); font-variant-numeric: tabular-nums; }
               .chapterize-guidance { padding: 8px 10px; border-left: 3px solid var(--chapterize-blue); background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); line-height: 1.4; }
               .chapterize-table-wrap { min-height: 0; overflow: auto; border: 1px solid var(--chapterize-border); border-radius: var(--chapterize-radius); background: var(--chapterize-surface); }
-              table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+              table { width: 100%; min-width: calc(var(--chapterize-title-width, 520px) + 1120px); border-collapse: collapse; table-layout: fixed; }
               th { position: sticky; top: 0; z-index: 1; background: var(--chapterize-surface-subtle); color: var(--chapterize-blue-ink); text-align: left; font-weight: 650; }
               th, td { padding: 7px 8px; border-bottom: 1px solid var(--chapterize-border); }
               tbody tr { background: var(--chapterize-surface); transition: background-color 160ms ease-out, opacity 160ms ease-out; }
@@ -709,7 +749,8 @@ export async function showSplitPlanDialog(
               tbody tr:last-child td { border-bottom: 0; }
               th:nth-child(1), td:nth-child(1) { width: 68px; text-align: center; }
               th:nth-child(2), td:nth-child(2) { width: 42px; color: var(--chapterize-muted); }
-              th:nth-child(4), td:nth-child(4) { width: 250px; }
+              th:nth-child(3), td:nth-child(3) { width: var(--chapterize-title-width, 520px); }
+              th:nth-child(4), td:nth-child(4) { width: 320px; }
               th:nth-child(5), td:nth-child(5) { width: 110px; }
               th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { width: 92px; }
               th:nth-child(8), td:nth-child(8) { width: 118px; }
@@ -718,7 +759,8 @@ export async function showSplitPlanDialog(
               th:nth-child(11), td:nth-child(11) { width: 88px; }
               td input[type="text"], td input[type="number"] { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-surface); color: var(--chapterize-ink); font: inherit; }
               td input[type="checkbox"] { accent-color: var(--chapterize-blue); }
-              .chapterize-title-cell { padding-block: 6px; }
+              .chapterize-title-cell { min-width: 0; padding-block: 6px; }
+              .chapterize-title-cell input { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
               .chapterize-printed-pages { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
               .chapterize-status { color: var(--chapterize-muted); }
               .chapterize-status::before { display: inline-block; width: 6px; height: 6px; margin-inline-end: 6px; border-radius: 50%; background: var(--chapterize-border-strong); content: ""; vertical-align: 1px; }
@@ -730,11 +772,13 @@ export async function showSplitPlanDialog(
               .chapterize-errors { min-height: 0; padding: 8px 10px; border: 1px solid color-mix(in oklch, var(--chapterize-danger) 35%, white); border-radius: var(--chapterize-radius); background: var(--chapterize-danger-soft); color: var(--chapterize-danger); }
               .chapterize-errors[hidden] { display: none; }
               .chapterize-delete { width: 100%; padding: 3px 8px; color: var(--chapterize-muted); }
-              .chapterize-clean-toggle { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 4px; color: var(--chapterize-ink); white-space: nowrap; }
-              .chapterize-clean-toggle input { accent-color: var(--chapterize-blue); }
+              .chapterize-title-width { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; padding: 0 4px; color: var(--chapterize-muted); white-space: nowrap; }
+              .chapterize-title-width input { width: 112px; accent-color: var(--chapterize-blue); }
+              .chapterize-title-width output { width: 42px; color: var(--chapterize-ink); font-variant-numeric: tabular-nums; }
               .chapterize-match { width: 100%; min-height: 30px; border: 1px solid var(--chapterize-border-strong); border-radius: 4px; background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font: inherit; }
-              .chapterize-doi-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; }
-              .chapterize-doi-lookup { min-width: 48px; min-height: 30px; border: 1px solid var(--chapterize-blue); border-radius: 4px; background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font: inherit; }
+              .chapterize-doi-controls { display: grid; grid-template-columns: minmax(0, 1fr) 60px; align-items: center; gap: 10px; }
+              .chapterize-doi-controls input { min-width: 0; padding-inline: 8px; }
+              .chapterize-doi-lookup { width: 60px; min-height: 30px; padding: 3px 8px; border: 1px solid var(--chapterize-blue); border-radius: 4px; background: var(--chapterize-blue-soft); color: var(--chapterize-blue-ink); font: inherit; white-space: nowrap; }
               .chapterize-input-error { border-color: var(--chapterize-danger) !important; background: var(--chapterize-danger-soft) !important; }
               .chapterize-doi-message { margin-top: 4px; color: var(--chapterize-blue-ink); font-size: .9em; line-height: 1.25; }
               .chapterize-doi-message-error { color: var(--chapterize-danger); }
@@ -791,13 +835,13 @@ export async function showSplitPlanDialog(
                     {
                       tag: "select",
                       id: ids.language,
+                      properties: { value: language },
                       children: [
                         {
                           tag: "option",
                           attributes: { value: "zh-CN" },
                           properties: {
                             textContent: getString("dialog-language-zh"),
-                            selected: language === "zh-CN",
                           },
                         },
                         {
@@ -805,7 +849,6 @@ export async function showSplitPlanDialog(
                           attributes: { value: "en-US" },
                           properties: {
                             textContent: getString("dialog-language-en"),
-                            selected: language === "en-US",
                           },
                         },
                       ],
@@ -813,8 +856,9 @@ export async function showSplitPlanDialog(
                         {
                           type: "change",
                           listener: (event: Event) => {
-                            language = (event.target as HTMLSelectElement)
-                              .value as SplitPlanLanguage;
+                            language = normalizeSplitPlanLanguage(
+                              (event.currentTarget as HTMLSelectElement).value,
+                            );
                             setPref("interfaceLanguage", language);
                             render(dialog.window.document);
                           },
@@ -898,36 +942,22 @@ export async function showSplitPlanDialog(
               attributes: { "aria-hidden": "true" },
             },
             {
-              tag: "label",
-              classList: ["chapterize-clean-toggle"],
-              children: [
+              tag: "button",
+              id: ids.cleanTitles,
+              attributes: { type: "button" },
+              properties: {
+                textContent: getString("dialog-clean-chapter-numbers"),
+              },
+              listeners: [
                 {
-                  tag: "input",
-                  id: ids.cleanTitles,
-                  attributes: { type: "checkbox" },
-                  properties: { checked: cleanTitles },
-                  listeners: [
-                    {
-                      type: "change",
-                      listener: (event: Event) => {
-                        cleanTitles = (event.target as HTMLInputElement)
-                          .checked;
-                        setPref("cleanChapterNumbers", cleanTitles);
-                        rows.forEach((row) => {
-                          row.title = cleanTitles
-                            ? cleanChapterTitle(row.originalTitle)
-                            : row.originalTitle;
-                        });
-                        render(dialog.window.document);
-                      },
-                    },
-                  ],
-                },
-                {
-                  tag: "span",
-                  id: ids.cleanTitlesLabel,
-                  properties: {
-                    textContent: getString("dialog-clean-chapter-numbers"),
+                  type: "click",
+                  listener: () => {
+                    cleanTitles = true;
+                    setPref("cleanChapterNumbers", true);
+                    rows.forEach((row) => {
+                      row.title = cleanChapterTitle(row.title);
+                    });
+                    render(dialog.window.document);
                   },
                 },
               ],
@@ -948,6 +978,60 @@ export async function showSplitPlanDialog(
                     rows.forEach((row) => (row.title = row.originalTitle));
                     render(dialog.window.document);
                   },
+                },
+              ],
+            },
+            {
+              tag: "label",
+              classList: ["chapterize-title-width"],
+              children: [
+                {
+                  tag: "span",
+                  attributes: { "data-i18n-key": "dialog-title-width" },
+                  properties: { textContent: getString("dialog-title-width") },
+                },
+                {
+                  tag: "input",
+                  id: ids.titleWidth,
+                  attributes: {
+                    type: "range",
+                    min: "320",
+                    max: "800",
+                    step: "40",
+                  },
+                  properties: { value: String(titleColumnWidth) },
+                  listeners: [
+                    {
+                      type: "input",
+                      listener: (event: Event) => {
+                        titleColumnWidth = normalizeTitleColumnWidth(
+                          (event.currentTarget as HTMLInputElement).value,
+                        );
+                        const root = dialog.window.document.querySelector(
+                          ".chapterize-dialog",
+                        ) as HTMLElement | null;
+                        root?.style.setProperty(
+                          "--chapterize-title-width",
+                          `${titleColumnWidth}px`,
+                        );
+                        const output = dialog.window.document.getElementById(
+                          ids.titleWidthValue,
+                        );
+                        if (output)
+                          output.textContent = `${titleColumnWidth}px`;
+                      },
+                    },
+                    {
+                      type: "change",
+                      listener: () =>
+                        setPref("titleColumnWidth", titleColumnWidth),
+                    },
+                  ],
+                },
+                {
+                  tag: "output",
+                  id: ids.titleWidthValue,
+                  properties: { textContent: `${titleColumnWidth}px` },
                 },
               ],
             },

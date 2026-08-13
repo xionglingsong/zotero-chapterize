@@ -3,6 +3,26 @@
 All notable changes to Chapterize are documented here in Chinese and English.
 Chapterize 的重要更新均在此以中英文记录。
 
+## [0.2.21] - 2026-08-13
+
+### 中文
+
+- 修复拆分预览语言下拉框不保留选中值、切换英文后界面不刷新的问题。
+- 将“清理章节编号”改为按钮，并避免清理时覆盖用户手工编辑的标题。
+- 新增标题栏宽度滑杆，可在 320–800 px 范围调节并记住设置；长标题保留完整悬浮提示。
+- 扩宽 DOI 栏并增加输入框与“获取”按钮的间距、独立边框和键盘焦点样式。
+- 修改标题后自动清除过期的标题匹配结果，避免旧 DOI/元数据误写入新标题。
+- 自动 Crossref 匹配仅处理当前启用章节，减少无关前置页查询和“未匹配”噪声。
+
+### English
+
+- Fixed the split-preview language selector not retaining its value or refreshing the interface after switching to English.
+- Replaced the chapter-number cleanup checkbox with a button and preserved manually edited titles during cleanup.
+- Added a persistent 320–800 px title-column width slider, while retaining full-title hover text.
+- Widened the DOI column and separated the input and Fetch button with clearer spacing, borders, and keyboard focus styles.
+- Invalidated stale title-based DOI/metadata matches after a title edit to prevent writing metadata for the previous title.
+- Limited automatic Crossref matching to enabled sections, reducing irrelevant front-matter lookups and “No match” noise.
+
 ## [0.2.20] - 2026-08-13
 
 ### 中文

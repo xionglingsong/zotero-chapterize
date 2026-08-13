@@ -9,6 +9,7 @@ declare namespace _ZoteroTypes {
     PluginPrefsMap: {
       "cleanChapterNumbers": boolean;
       "interfaceLanguage": string;
+      "titleColumnWidth": number;
     };
   }
 }
